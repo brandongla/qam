@@ -1,0 +1,31 @@
+[Unit]
+Description=QAM market data recorder (%i)
+Documentation=https://github.com/brandongla/qam/blob/main/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=qam
+Group=qam
+ExecStart=/opt/qam/venv/bin/qam record run --config /etc/qam/recorder.yaml --venue %i
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Environment=PYTHONUNBUFFERED=1
+LimitNOFILE=65536
+
+# Hardening: read-only system, writes only to the data directory.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/qam
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

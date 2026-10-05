@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft (living document) |
-| **Version** | 0.7.1 |
+| **Version** | 0.8.0 |
 | **Last updated** | 2026-10-05 |
 | **Owner** | @brandongla |
 | **Initial scope** | Cryptocurrencies, focused on decentralized exchanges (DEXs) |
@@ -888,6 +888,20 @@ Strategies whose edge depends on intrabar path or sub-bar timing must be confirm
 
 All sources and coverage facts above are recorded in the data catalog and verified by the Data Steward. This table is a starting snapshot.
 
+### 11.9 Forward recorder implementation (Phase 1, D-030/D-031)
+
+Code: `src/qam/recorders`, `src/qam/data/raw`. Operations: `deploy/README.md`.
+
+- **Raw-first (D-030).** Recorders store every received message **verbatim** (`raw` = exact text) inside an envelope with `recv_ns` (wall clock), `mono_ns` (monotonic), venue, connection id (`<venue>:<shard>#<epoch>@<run>`), and per-connection sequence number. Channel/market classification is best-effort and used only to choose the archive stream. All parsing into canonical schemas happens offline, in versioned normalizers. A protocol misunderstanding can then never destroy data that can't be re-collected.
+- **Gaps are data.** Connects, disconnects (with reason), subscriptions (exact keys per connection), stalls, venue errors, sequence regressions, plan changes, and crash recoveries are written as `meta` records. Coverage windows per stream are derived from them.
+- **Durability.** Hourly-rotated zstd JSONL. A frame is closed and fsynced every 5 s [DEFAULT], so a crash loses at most ~5 s. `.part` files are recovered on restart. Closed files are listed with SHA-256 in a per-venue daily manifest and never modified (§17.1 backup unit).
+- **Connections.** Subscriptions are sharded across connections (per-venue max per connection), paced by a venue-wide rate limiter, and capped venue-wide. Plans are ordered by priority (L2 books, then markets by descending volume), so a cap drops the least liquid markets first. Each shard reconnects with jittered exponential backoff, answers venue keepalives, and reconnects on a data stall [DEFAULT 120 s]. New listings are picked up every 6 h without disturbing running connections.
+- **Isolation.** One process per venue (systemd template), with an exclusive per-venue lock. Crash recovery touches only the process's own venues.
+- **Venue specifics (D-031):**
+  - *Hyperliquid* WS `l2Book` provides aggregated top-of-book levels (no full-depth deltas). Deeper views come from coarser `nSigFigs` aggregations. Their messages don't identify the aggregation, so each aggregation level runs on dedicated connections and its own stream (`l2_sf4`, `l2_sf3`).
+  - *Lighter* `order_book` provides a full snapshot followed by deltas with increasing (non-contiguous) offsets, so full depth is recorded for the L2 market set. Lighter has no dedicated BBO channel in the MVP plan, so top-of-book for markets outside the L2 set isn't recorded (configurable: `order_book: all`).
+- **Testing.** Unit tests plus end-to-end tests against local fake venue servers (drops, stalls, keepalive, offset regressions, crash recovery). Protocol details come from the venues' official SDKs. The first live validation is the VM smoke test (`install.sh --smoke`).
+
 ---
 
 ## 12. Execution Realism (DEX-first)
@@ -1136,7 +1150,7 @@ The MVP runs on a single **Oracle Cloud VM** provided by the user (D-027). Deplo
 | Phase | Name | Scope | Exit criteria |
 |-------|------|-------|---------------|
 | 0 | **Design** | This document. Resolve critical open questions. | Q-12 (first providers) and Q-16 (first execution venues) decided |
-| 1 | **Data foundation** | Connector framework, format adapters, raw archive, normalized PIT store, QA, instrument master. Majors (BTC/ETH/SOL) CEX OHLCV + tick history. **Forward recorders on target DEX venues started immediately** (§11.8). Hyperliquid archive ingestion. Audit of delisted-symbol coverage per CEX source. | Multi-year reconciled Majors history at tick and bar level, recorders running, QA report |
+| 1 | **Data foundation** *(in progress: raw archive, Hyperliquid + Lighter recorders, VM installer done)* | Connector framework, format adapters, raw archive, normalized PIT store, QA, instrument master. Majors (BTC/ETH/SOL) CEX OHLCV + tick history. **Forward recorders on target DEX venues started immediately** (§11.8). Hyperliquid archive ingestion. Audit of delisted-symbol coverage per CEX source. | Multi-year reconciled Majors history at tick and bar level, recorders running, QA report |
 | 2 | **Core library & engine certification** | Data API, operators, screening engine, reference oracle, integrity checks, seeded-defect canaries, Trial Registry, Ledger, Stat Gate Service, performance benchmark suite, basis model v1 | Certification suite green. Canaries 100% detected. Null strategies rejected at the expected rate. Performance budgets met. |
 | 3 | **Model gateway & agent MVP** | Gateway with Anthropic-native and OpenRouter adapters (D-024), registry, role profiles, initial QAM-Bench. Director + 1 desk + Validation Office + Reporter. Request intake. | One human request answered end-to-end with a full report |
 | 4 | **High-fidelity & on-chain data** | On-chain AMM connectors (EVM + Solana), AMM-exact and order-book simulation, gas/MEV models, Altcoin and Speculative universes from on-chain populations | Simulated fills match a sample of real historical trades within tolerance. Proxy fidelity test run on all overlap windows. |
@@ -1179,6 +1193,8 @@ The MVP runs on a single **Oracle Cloud VM** provided by the user (D-027). Deplo
 | D-027 | 2026-10-05 | MVP deployment target: a single user-provided Oracle Cloud VM. Broader deployment options after the MVP. | User direction (§17.1) | Accepted |
 | D-028 | 2026-10-05 | MVP VM is ARM64, 4 CPU / 24 GB RAM. All code, dependencies, CI, and any containers support **both linux/arm64 and linux/amd64**. Idle reclamation isn't treated as a risk for this account. *(Resolves Q-18; backup target split out as Q-19.)* | User direction; avoids architecture lock-in (§17.1) | Accepted |
 | D-029 | 2026-10-05 | MVP backups go to the user's local machine via pull-based SSH sync of closed, checksummed recording files (client in WSL2, triggered by Windows Task Scheduler, stored on a Windows drive). VM deletes data only after acknowledged backup and above a disk threshold. Cloud object storage deferred until after the MVP. *(Resolves Q-19.)* | User direction: free-tier cloud limits likely too low. Zero cost for the MVP. (§17.1) | Accepted |
+| D-030 | 2026-10-05 | Recorders are raw-first: messages stored verbatim in a timestamped envelope, with gap events as `meta` records. Normalization happens offline in versioned code. One process per venue with an exclusive lock. | Data that can't be re-collected must not depend on parser correctness (§11.9) | Accepted |
+| D-031 | 2026-10-05 | Amends D-025 recording scope to match venue capabilities. Hyperliquid: aggregated `l2Book` (top levels) for the L2 set plus coarser `nSigFigs` aggregations for Majors on isolated connections (no full-depth deltas exist on the WS). Lighter: full-depth `order_book` snapshots + deltas for the L2 set (top-30 by volume + Majors); `market_stats` for all markets; no separate BBO for non-L2 markets in the MVP. | Venue protocol constraints found during implementation (§11.9) | Accepted |
 
 ---
 
@@ -1275,6 +1291,7 @@ Parameter sweeps, CV folds, CSCV, robustness variants, and null injection multip
 | 0.6.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-18 (D-028): ARM64 4-CPU/24 GB VM, dual-architecture (arm64 + amd64) build requirement. Added recording-volume estimate and backup options with a recommendation (§17.1). New Q-19 (backup target). |
 | 0.7.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-19 (D-029): MVP backups pulled to the user's local machine, with checksum manifest, acknowledgement-gated VM retention, and alerts (§17.1). |
 | 0.7.1 | 2026-10-05 | Claude (with @brandongla) | Clarified the backup client environment: WSL2 + Windows Task Scheduler, backups stored on a Windows drive (§17.1). |
+| 0.8.0 | 2026-10-05 | Claude (with @brandongla) | Phase 1 implementation: added §11.9 forward recorder implementation (raw-first envelope, gap meta events, durability, sharding/pacing/caps, per-venue isolation). D-030 (raw-first). D-031 amends D-025 recording scope to venue protocol capabilities. Roadmap Phase 1 marked in progress. |
 
 ---
 

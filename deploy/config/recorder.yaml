@@ -1,0 +1,41 @@
+# QAM forward recorder configuration (DESIGN.md §11.8, §17.1, D-025).
+# Anything omitted falls back to the built-in defaults in src/qam/recorders/config.py.
+
+data_root: /srv/qam/data
+
+archive:
+  flush_interval_s: 5     # max data lost on a crash (seconds)
+  max_file_mb: 512        # rotate early if an hour's file exceeds this (uncompressed)
+  zstd_level: 3
+
+health_interval_s: 10     # writes <data_root>/health/<venue>.json
+
+venues:
+  hyperliquid:
+    enabled: true
+    # Channel switches: all | l2 (only the L2 market set) | none
+    channels: {trades: all, bbo: all, asset_ctx: all, l2: l2}
+    l2:
+      markets: [BTC, ETH, SOL]   # always included
+      top_n_by_volume: 20        # plus the top-N other markets by 24h volume
+      extra_sig_figs_for: [BTC, ETH, SOL]
+      sig_figs: [4, 3]           # coarser aggregated books = deeper view (separate streams)
+    connection:
+      max_subscriptions: 100        # per connection
+      max_total_subscriptions: 950  # venue-wide cap (lowest-volume markets dropped first)
+      subscribe_rate_per_s: 20
+      stall_timeout_s: 120          # reconnect if no data for this long
+    refresh_markets_s: 21600        # pick up new listings every 6h
+
+  lighter:
+    enabled: true
+    channels: {trades: all, market_stats: all, order_book: l2}
+    l2:
+      markets: [BTC, ETH, SOL]
+      top_n_by_volume: 30
+    connection:
+      max_subscriptions: 50
+      max_total_subscriptions: 600
+      subscribe_rate_per_s: 10
+      stall_timeout_s: 120
+    refresh_markets_s: 21600

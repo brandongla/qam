@@ -13,3 +13,10 @@ DEXs. The full specification is in `docs/DESIGN.md`.
   - Add a row to the **Changelog** section.
   - Record decisions in the **Decision Log** section with the next `D-NNN` ID. When an item in **Open Questions** is resolved, move it into the Decision Log and reference its `Q-NN` ID.
 - Don't silently change `[DEFAULT]` thresholds. Each change needs a Decision Log entry with its rationale.
+
+## Development
+- Python ≥ 3.11, uv. Setup: `uv venv --python 3.12 && uv pip install -e ".[dev]"`.
+- Before committing: `ruff check src tests && ruff format --check src tests && pytest -q`.
+- Code must run on both linux/arm64 and linux/amd64 (D-028). Only add dependencies with wheels for both.
+- Recorders store venue messages verbatim (raw-first, D-030). Never parse/transform inside a recorder; normalization is offline.
+- This sandbox can't reach venue APIs; test against local fakes (`tests/fakes.py`). Live checks run on the VM (`deploy/README.md`).

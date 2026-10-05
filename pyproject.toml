@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "qam"
+version = "0.1.0"
+description = "Agentic quantitative research system — data recorders and research core"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+# Every dependency must ship wheels (or build cleanly) for linux/arm64 and linux/amd64 (D-028).
+dependencies = [
+    "websockets>=13",
+    "zstandard>=0.22",
+    "orjson>=3.9",
+    "pyyaml>=6",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+qam = "qam.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qam"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF012"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
