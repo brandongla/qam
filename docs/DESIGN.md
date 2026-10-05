@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft (living document) |
-| **Version** | 0.2.0 |
+| **Version** | 0.3.0 |
 | **Last updated** | 2026-10-05 |
 | **Owner** | @brandongla |
 | **Initial scope** | Cryptocurrencies, focused on decentralized exchanges (DEXs) |
@@ -36,7 +36,7 @@
 14. [Efficiency & Budgeting](#14-efficiency--budgeting)
 15. [Provenance, Reproducibility & Memory](#15-provenance-reproducibility--memory)
 16. [Extensibility to Other Asset Classes](#16-extensibility-to-other-asset-classes)
-17. [Proposed Technology Stack](#17-proposed-technology-stack)
+17. [Technology Stack](#17-technology-stack)
 18. [Roadmap](#18-roadmap)
 19. [Decision Log](#19-decision-log)
 20. [Open Questions](#20-open-questions)
@@ -288,6 +288,33 @@ flowchart LR
 - **Tools are provider-neutral.** Agent tools (engine, data, registry, KB, reports) are exposed via MCP servers. Permissions are enforced in *our* tool layer, not by any provider, so §5 barriers hold whatever model is behind a role.
 - **Agent runtime.** A thin in-house agent loop on top of the gateway: role prompt, context assembly, tool calls, budget checks. It isn't tied to any vendor SDK (D-018).
 
+### 6.1a Provider landscape & adapter coverage
+
+**Snapshot as of 2026-10-05.** Model names and prices change often. Anthropic entries were checked against Anthropic's own reference. Other entries come from third-party pricing summaries and must be verified against each provider's official documentation before they go into the registry. The registry, not this table, is the source of truth.
+
+| Category | Provider / route | Notable current models (snapshot) | API style | Notes |
+|----------|------------------|-----------------------------------|-----------|-------|
+| Frontier closed | **Anthropic** (Claude API; also via AWS Bedrock, Google Vertex AI, Microsoft Foundry) | Claude Fable 5.1 (top tier, $10/$50 per MTok), Opus 5.5 ($4/$20), Sonnet 5.5 ($2/$10), Haiku 4.5 ($1/$5). 1M context on Fable/Opus/Sonnet. | Anthropic Messages API | Prompt caching, batch (50% off), structured outputs, adaptive thinking with effort control |
+| Frontier closed | **OpenAI** (also via Azure) | GPT-6 family (Astra / Sol / Luna) and GPT-5.6 family (Sol / Terra / Luna) *(unverified)* | OpenAI Responses / Chat Completions | Cached-input discounts, batch API, long-context surcharge on some models |
+| Frontier closed | **Google** (Gemini API; Vertex AI) | Gemini 3.1 Pro, 3.8 Flash, 3.5 Flash-Lite. Gemini 4 announced, but not yet callable via the API. *(unverified)* | Gemini API (also offers an OpenAI-compatible endpoint) | Very cheap Flash tiers. Long context. |
+| Frontier closed | **xAI** | Grok 4.7 *(unverified)* | OpenAI-compatible | Lower price point for flagship-class work |
+| Open-weight (API or self-host) | **DeepSeek** | V4 Pro, V4 Flash *(unverified)* | OpenAI-compatible | Very low cost. MIT-licensed weights. |
+| Open-weight | **Moonshot (Kimi)**, **Zhipu (GLM)**, **Alibaba (Qwen)**, **Mistral**, **Meta (Llama)**, **MiniMax** | Kimi K2.6/K3, GLM-5.2, Qwen 3.x, Mistral, Llama *(unverified)* | Mostly OpenAI-compatible (first-party APIs or hosts) | Candidates for cheap high-volume roles, and for confidentiality via self-hosting |
+| Inference hosts | Together, Fireworks, Groq, DeepInfra, etc. | Host open-weight models | OpenAI-compatible | Price/speed competition on open models |
+| Aggregator (hosted) | **OpenRouter** | Hundreds of models behind one key | OpenAI-compatible | Fastest way to bench many models. Adds a third-party dependency and data path. |
+| Gateway library (self-hosted) | **LiteLLM** (also Portkey, etc.) | Proxy/SDK over 100+ providers | OpenAI-compatible facade | Option for Q-15 |
+| Local | vLLM, Ollama, llama.cpp | Any open-weight model on our hardware | OpenAI-compatible | No data leaves our infrastructure. Bounded by our hardware. |
+
+**Adapter strategy (D-022).** Four adapters give access to effectively every significant model:
+1. **Anthropic native**: full feature access (caching, effort/thinking controls, batch, structured outputs). The same adapter reaches Bedrock, Vertex, and Foundry through Anthropic's SDK platform clients.
+2. **OpenAI native**: full feature access to OpenAI models (and Azure OpenAI).
+3. **Google Gemini native**: full feature access to Gemini (and Vertex).
+4. **Generic OpenAI-compatible**: one configurable adapter covering xAI, DeepSeek, Mistral, Kimi, GLM, Qwen, inference hosts, OpenRouter, and local vLLM/Ollama. Declared capabilities may be more limited, and the conformance suite reports what each endpoint actually supports.
+
+Native adapters exist because the most valuable cost/quality features (prompt caching, reasoning controls, batch) differ by provider and are lost behind lowest-common-denominator interfaces.
+
+**Confidentiality (data policy).** Strategy ideas and results are proprietary. Each registry entry records the provider's `data_policy` (training use, retention period, zero-data-retention availability). Work items are tagged with a sensitivity level, and the router only sends `confidential` work (e.g. frozen candidates, validated strategy details) to models whose data policy is acceptable for it, or to self-hosted models.
+
 ### 6.2 Model Registry
 
 The registry is version-controlled configuration listing every model we can use:
@@ -309,6 +336,8 @@ models:
     pricing: {input_per_mtok: ..., output_per_mtok: ..., cached_input_per_mtok: ...}
     limits: {rpm: ..., tpm: ...}
     bench: {release: QB-0.3, scores: {strategy_compose: ..., defect_detection: ..., faithfulness: ..., ...}}
+    data_policy: {trains_on_api_data: false, retention_days: 30, zdr_available: true}   # §6.1a
+    adapter: anthropic_native              # anthropic_native | openai_native | gemini_native | openai_compatible
     added: 2026-10-05
     notes: ""
 ```
@@ -338,7 +367,7 @@ roles:
 ```
 
 **Routing rules:**
-1. **Eligibility:** status ∈ {active, canary}, meets capability requirements and minimum bench scores, and respects the diversity constraint.
+1. **Eligibility:** status ∈ {active, canary}, meets capability requirements and minimum bench scores, respects the diversity constraint, and has a `data_policy` acceptable for the work item's sensitivity level (§6.1a).
 2. **Objective:** `min_cost` picks the cheapest eligible model. `max_quality` picks the highest role-relevant bench score. `balanced` maximizes score per dollar.
 3. **Cascade (optional, routine roles only):** start with the cheapest eligible model and escalate to a stronger one on schema failure, tool error, or low self-reported confidence. Never used for Validation Office verdicts.
 4. **Stickiness:** the model is resolved once per work item (e.g. per hypothesis stage) and pinned for its duration. A single review isn't produced by a mix of models.
@@ -498,11 +527,14 @@ id: HYP-000123
 version: 1
 family: cross_sectional_momentum
 origin: {type: human_request, ref: REQ-0007}     # or {type: agent, ref: scout-07}
-title: "Short-horizon momentum in mid-cap DEX tokens"
+title: "Short-horizon momentum in altcoins"
 mechanism: >
   Who pays us and why it persists.
+asset_class: altcoin               # major | altcoin | speculative (§13.1); classes are separate trial families
 universe:
-  rule_ref: UNIV-tierB-v1          # versioned PIT universe rule (§13)
+  rule_ref: UNIV-altcoin-v1        # versioned PIT universe rule (§13)
+evaluation_mode: proxy             # native | proxy (§12.1)
+signal_data_venue: cex             # where research data comes from
 data_requirements:
   - {kind: bar, interval: 1h, fields: [o, h, l, c, v]}
   - {kind: amm_state, needed_for: execution}
@@ -513,7 +545,7 @@ search_space:
   lookback_hours: [6, 12, 24, 48]
   holding_hours: [6, 12, 24]
 expected_effect: {direction: positive, rough_magnitude: "SR 0.5-1.5 net"}
-execution_venue: dex               # dex | cex (see Q-11)
+execution_venue: lighter_perp      # specific venue; its cost/latency model applies (§12)
 cost_assumptions: "engine default cost model for venue + 2x stress"
 kill_criteria:
   - "Screening net SR < 0.3 across all search-space points"
@@ -580,6 +612,8 @@ The effective trial count is estimated by clustering trial return streams. The r
 | Placebo tests | Shuffled signal shows no edge. Sign-flipped strategy loses money. |
 | Data-source robustness | Where multiple sources exist for the same asset/period, results agree within tolerance. |
 | Granularity robustness | If the edge relies on intrabar behavior, it must be confirmed on tick data (§11.5). |
+| Proxy fidelity (proxy mode only) | Passes the proxy-error budget and the native-overlap fidelity test (§12.1). |
+| Graveyard check (speculative class) | Performance holds on the full population, including dead, rugged, and delisted tokens, at realistic exit prices (§13.1). |
 | Implementation equivalence | Screening and high-fidelity tiers agree within tolerance. |
 
 ### 9.5 Holdout criteria (G4)
@@ -602,6 +636,9 @@ These are declared at freeze, before vault access. Default: net Sharpe on the va
 | Engine/accounting bugs | Certified library, oracle cross-checks, invariants, mutation testing (§10.5) |
 | Agent re-implementing logic with subtle bugs | Sandbox import allowlist, declarative specs, inadmissibility rule (§10.2) |
 | Survivorship bias | PIT universes include dead/delisted/rugged assets (§11.6, §13) |
+| CEX→DEX proxy error | Basis model, adverse-basis fills, proxy-error budget, native-overlap fidelity test (§12.1) |
+| Spurious CEX→DEX lead-lag alpha | Lead-lag guard: such strategies need native data (§12.1) |
+| Speculative-token survivorship / rug losses | On-chain population universes, realizable-exit death handling, graveyard check (§13.1) |
 | Selection bias via silent retries | Engine-enforced logging (R3), Trial Registry |
 | Search-space creep | Pre-registration, versioning, trial carry-over |
 | Holdout leakage via feedback | Coarse gatekeeper responses, holdout budget |
@@ -696,6 +733,26 @@ flowchart LR
 | Mutation testing | Mutation score on `core` ≥ target [DEFAULT 85%]. Line coverage ≥ 95% [DEFAULT]. |
 | External sanity | Reproduce a few well-known published results within tolerance |
 
+### 10.6 Performance architecture (D-023)
+
+Backtests are data- and compute-heavy, and the null-injection, robustness, and CSCV requirements multiply the number of runs. Performance is a first-class requirement. Correctness is protected by the rule that **every optimized path must match the reference oracle** (§10.5), so speed work can't introduce bugs.
+
+| Area | Approach |
+|------|----------|
+| **Storage layout** | Parquet (zstd), Hive-partitioned by `kind/source/instrument/date`, sorted by time, sized row groups with min/max statistics for predicate pushdown. Hot datasets on local NVMe, cold on object storage. |
+| **In-memory format** | Apache Arrow throughout. Zero-copy hand-off between Polars, DuckDB, and NumPy. Memory-mapped reads. |
+| **Query** | Lazy queries (Polars lazy / DuckDB) with projection and predicate pushdown. Only the needed columns, instruments, and time range are read. Out-of-core execution for datasets larger than memory. |
+| **Precomputation** | Standard derived datasets (e.g. 1s/1m/5m/1h bars from ticks, daily universe membership) are materialized once by certified code and versioned. Agents don't rebuild them per run. |
+| **Feature cache** | Content-addressed: key = hash(operator version, input snapshot, params). Any agent's identical feature request is a cache hit. This is also the main deduplication mechanism. |
+| **Load once, evaluate many** | Parameter sweeps, CV folds, and robustness variants run as a single job over shared in-memory data. Where possible, computation is vectorized across the parameter axis (e.g. many lookbacks in one pass). |
+| **Hot loops** | Vectorized Polars/NumPy first. Numba for path-dependent loops. **Rust (PyO3)** for the event-driven engine core, order-book replay, and AMM/CLMM math. |
+| **Parallelism** | Embarrassingly parallel over parameters, folds, instruments, and injected nulls. Local process pool first, then a distributed scheduler when one machine isn't enough (Q-17). Per-task deterministic seeds keep results reproducible under parallel execution. |
+| **Tick-scale data** | Streaming/chunked processing by instrument-day, with bounded memory. Pre-aggregated bars used for screening wherever fidelity rules allow (§11.5). |
+| **Numerics** | float64 for analytics. Fixed-point int64 for high-fidelity accounting (no cumulative float drift in cash and positions). |
+| **Performance regression testing** | A benchmark suite runs in CI. A slowdown beyond a threshold [DEFAULT 15%] fails the build unless it's justified in the release notes. Budgets: screening trial ≤ 60 s on the standard universe [DEFAULT]. |
+| **Profiling** | Standard profilers on engine releases. Per-stage timing written to each ledger record, so the slowest operations are visible. |
+| **Accelerators** | GPU (cuDF/JAX) only if profiling shows a clear win for a specific workload. Not a default dependency. |
+
 **Engine releases** are semver-versioned. Every ledger record includes the engine version. A new version must pass certification, and any change to golden/regression results must be explained in the release notes. Results affected by a bug fix are flagged for re-run (§15.2).
 
 ---
@@ -789,7 +846,7 @@ Strategies whose edge depends on intrabar path or sub-bar timing must be confirm
 
 - One canonical `asset` (e.g. BTC) maps to many `instruments`: venue-specific tickers and on-chain representations (WBTC, cbBTC, tBTC, …; ETH/WETH; SOL/wSOL).
 - Quote currencies are explicit (USD, USDT, USDC, …). Stablecoin depegs are tracked, and USDT and USD aren't assumed equal.
-- **Listing history:** `listed_at` / `delisted_at` per instrument per venue. This is needed for PIT universes. Free endpoints often expose only currently-listed symbols, so delisted coverage is tracked as a known gap (Q-14).
+- **Listing history:** `listed_at` / `delisted_at` per instrument per venue. This is needed for PIT universes. Free CEX endpoints often expose only currently-listed symbols. Each CEX source is audited for delisted-symbol coverage in Phase 1, and gaps are recorded in the catalog. For tokens traded on-chain, the population comes from on-chain creation and pool events, which include dead tokens by construction (§13.1, D-021).
 
 ### 11.7 Data QA & quarantine
 
@@ -798,41 +855,98 @@ Strategies whose edge depends on intrabar path or sub-bar timing must be confirm
 - Wash-trading / fake-volume filters. Token risk flags (honeypot, fee-on-transfer, rebasing, mint authority).
 - Failing data is quarantined. Experiments that consumed later-quarantined data are flagged (§15.2).
 
+### 11.8 Source acquisition strategy (D-020)
+
+**Problem.** Long, fine-grained history is easy to get from CEXs and hard to get from many DEXs. For example, a DEX API might serve 1-minute candles over only a short window, so older history is available only at coarser intervals. DEX fine-grained history differs by venue type:
+
+| DEX venue type | Examples | Where fine-grained history comes from | Status |
+|----------------|----------|----------------------------------------|--------|
+| **On-chain AMM (spot)** | Uniswap, Aerodrome, Curve; Raydium, Orca, Meteora | Every swap is an on-chain event, so **complete tick-level history since pool creation** can be reconstructed from chain data: public blockchain datasets in Google BigQuery (Ethereum, Solana, and other chains; free monthly query tier), or RPC log queries. No candle-window limits. | To verify chain coverage (e.g. Base) in Phase 1 |
+| **On-chain order-book perp DEX** | Hyperliquid | Official archive in a requester-pays S3 bucket: hourly L2 book snapshots, daily asset contexts (funding, OI, mark), and node fills by block. No candles; updates ~monthly, may have gaps. Community trade datasets also exist. | To verify coverage and start date in Phase 1 |
+| **Order-book perp DEX with limited history** | Lighter | Own API candles have a limited lookback at 1m. A third-party vendor (Tardis.dev) has captured data since 2026-04-17. | Short history, so native data must be **recorded going forward** |
+| **CEX (proxy or native)** | Large centralized exchanges | Public bulk archives and REST APIs: multi-year ticks and OHLCV | User has working sources/scripts |
+
+**Policy:**
+1. **Start forward recorders now** (WebSocket trades, L1/L2 book, funding) on target DEX execution venues (e.g. Lighter, Hyperliquid). Native history compounds over time and costs almost nothing to collect. Every month recorded now is native validation data later.
+2. **Ingest native archives** where they exist (on-chain AMM history; Hyperliquid archive).
+3. **Use CEX history for depth** (long multi-regime samples), under the evaluation-mode rules in §12.1.
+4. **Third-party vendors** only later, if native gaps block important research.
+
+All sources and coverage facts above are recorded in the data catalog and verified by the Data Steward. This table is a starting snapshot.
+
 ---
 
 ## 12. Execution Realism (DEX-first)
 
-Each strategy declares an `execution_venue`. The engine applies that venue's execution and cost model, *independent of which source provided the research data*. Using one venue's data to simulate trading on another (e.g. CEX bars for a DEX-executed strategy) requires a **proxy-validity check**: basis and tracking error between venues over the test period, plus a cost model for the actual execution venue. See Q-11.
+Each strategy declares an `execution_venue` (a specific venue, e.g. `lighter_perp`, `hyperliquid_perp`, `uniswap_v3_base`, or a CEX). The engine applies **that venue's** execution and cost model, *independent of which source provided the research data*.
 
-| Concern | Requirement (DEX) |
-|---------|-------------------|
+### 12.1 Evaluation modes: native vs proxy (D-019)
+
+**Why proxy mode exists.** Fees differ widely by venue. Some DEXs charge zero or near-zero trading fees, while CEX taker fees can be far higher for the same pair. A strategy that loses money on CEX fees may be profitable on a low-fee DEX, but long fine-grained history usually exists only for the CEX. The approach: **build and test on CEX data, execute on the DEX**, and treat the price gap between the two as an explicit, modeled, stress-tested risk.
+
+| Mode | Research data | Execution model | Fidelity | Use |
+|------|---------------|-----------------|----------|-----|
+| **Native: CEX** | CEX | CEX fees/spread/impact | Highest for CEX execution | Strategies robust enough to survive CEX fees. Most accurate where they exist. |
+| **Native: DEX** | Execution DEX's own history (on-chain AMM, Hyperliquid archive, our recordings) | DEX venue model | Highest for DEX execution | Whenever enough native history exists |
+| **Proxy** | CEX (signal + simulated prices) | Target DEX venue model + basis model | Reduced, explicitly bounded | Long-history research where native DEX history is too short |
+
+**Proxy-mode controls.** All are mandatory for any strategy in proxy mode:
+
+1. **Basis model.** Measure the CEX–DEX price deviation (DEX mid/mark/fill vs CEX mid) over every window where both exist: our recordings, vendor overlap, Hyperliquid archive vs CEX perps, on-chain AMM vs CEX. Characterize its distribution, persistence (half-life), and dependence on volatility, time of day, and venue liquidity. The basis model is versioned and recalibrated as native data accumulates.
+2. **Proxy fills.** Simulated DEX fill = CEX reference price + **adverse basis draw** (sampled from the empirical distribution, stressed [DEFAULT: 90th-percentile adverse]) + DEX fees + DEX impact model (order-book depth or AMM math) + DEX latency.
+3. **Proxy-error budget.** Average expected edge per trade must exceed **k × typical |basis|** [DEFAULT k = 3]. Short-horizon strategies with small per-trade edges usually fail here unless native data exists. That's intended: their apparent edge is the same size as the proxy error.
+4. **Native-overlap fidelity test.** On every window with native DEX data, run the strategy on native data and on proxy data. Positions must agree (correlation ≥ [DEFAULT 0.8]), and the P&L tracking error must be within tolerance. Reported even when the overlap is short, with that caveat.
+5. **Lead-lag guard.** CEX prices often lead DEX prices. A proxy backtest can mistake "trade on the DEX after seeing the CEX move" for alpha, when in reality arbitrageurs and MEV capture it first. CEX→DEX lead-lag strategies form a separate hypothesis family that **requires native data**, and proxy-mode execution latency is never optimistic relative to the basis half-life.
+6. **Venue-specific funding.** For perps, funding comes from the execution venue's history where available (e.g. Hyperliquid asset contexts), otherwise from a stressed model. CEX funding is never assumed equal to DEX funding.
+7. **Forward test is decisive.** Paper trading on the actual DEX (G6) is the cleanest proxy check. Proxy-mode strategies need a longer minimum paper period [DEFAULT 1.5× the native-mode minimum].
+8. **Disclosure.** Reports show the evaluation mode, basis-model version, overlap length, and fidelity-test results in the verdict box.
+
+**Fee and latency are a joint trade-off.** Low-fee tiers can come with constraints such as slower order handling for standard accounts, or rebates that depend on volume. Venue models encode fee **and** latency per account tier, and the fee advantage is always evaluated net of those constraints.
+
+### 12.2 Venue execution requirements
+
+| Concern | Requirement |
+|---------|-------------|
 | **AMM price impact** | Exact pool math: constant product (v2), concentrated liquidity tick traversal (v3/v4, Orca Whirlpools, Raydium CLMM, Meteora DLMM bins), StableSwap (Curve), weighted pools (Balancer). Multi-hop routes simulated hop by hop. |
+| **Order-book DEX / CEX fills** | Fill against recorded or reconstructed book depth where available. Otherwise a calibrated spread + impact model. Maker fills require a queue-position model, and maker fills are never assumed by default. |
 | **Liquidity & capacity** | Size capped as a fraction of depth within X% impact. Capacity curve reported. |
-| **Fees** | Pool fee tier, protocol fees, aggregator fees. |
-| **Gas / priority fees** | Per-block gas on EVM chains (plus L1 data fees on L2s). Solana base + priority fees. Failed transactions also cost fees. |
-| **MEV** | Sandwich/frontrun haircut for public-mempool orders, calibrated from history. Private-orderflow scenario. |
-| **Latency / inclusion** | Execution no earlier than the next block/slot after `knowledge_time`. Inclusion probability under congestion. |
-| **Token pathologies** | Fee-on-transfer and rebasing tokens handled or excluded. Honeypots excluded. Rugged tokens stay in the universe until their PIT exit. |
+| **Fees** | Venue/account-tier fee schedule (maker/taker, rebates), pool fee tier, protocol and aggregator fees. |
+| **Gas / priority fees** | Per-block gas on EVM chains (plus L1 data fees on L2s). Solana base + priority fees. Failed transactions also cost fees. Not applicable on gasless order-book venues. |
+| **MEV** | Sandwich/frontrun haircut for public-mempool AMM orders, calibrated from history. Private-orderflow scenario. |
+| **Latency / inclusion** | Execution no earlier than the next block/slot (or the venue's order latency, including account-tier latency) after `knowledge_time`. Inclusion probability under congestion. |
+| **Token pathologies** | Fee-on-transfer and rebasing tokens handled or excluded. Honeypots (can't sell) are simulated as total loss. Rugged/dead tokens stay in the universe until their PIT exit (§13.1). |
 | **Bridging / inventory** | Bridge fees, latency, and inventory constraints for cross-chain strategies. |
-| **Funding (perps)** | Funding payments, mark/index mechanics, liquidation rules. |
+| **Funding (perps)** | Venue-specific funding, mark/index mechanics, liquidation rules, margin requirements. |
 | **LP strategies** | Fee accrual, IL/LVR, rebalancing gas, JIT competition. |
-
-A **CEX execution model** (spread, taker/maker fees, depth-based impact, funding) is also maintained, both for proxy-validity comparisons and in case Q-11 allows CEX execution.
+| **Venue risk** | Venue outages, halts, and delistings are modeled where history exists, and noted as risks in reports. |
 
 ---
 
 ## 13. Pilot Universe & Research Agenda
 
-### 13.1 Pilot universe
+### 13.1 Asset classes & pilot universe (D-021)
 
-| Tier | Assets | Representations / venues | Purpose |
-|------|--------|--------------------------|---------|
-| **A — Majors** | **BTC, ETH, SOL** | CEX reference data (long OHLCV + tick history from free endpoints). On-chain: WBTC/cbBTC and WETH on Ethereum, Base, and Arbitrum DEXs; SOL and wrapped BTC/ETH on Solana DEXs. | Deep liquidity, long history, low data risk. Establishes baselines and calibrates the engine. |
-| **B — Smaller caps** | Rule-selected basket [DEFAULT N = 20–30] | DEX pools on the same chains, plus CEX where listed | Potentially distinct behavior (less efficient, retail-driven, launch/unlock dynamics) |
+Crypto assets behave and fail differently by class, so each class has its own universe rules, survivorship controls, and trial families. Results from different classes are never pooled into one statistic.
 
-**Tier B selection must be rule-based and point-in-time, not hand-picked.** Picking today's popular small caps builds in survivorship and hindsight bias. The rule (versioned as `UNIV-tierB-vN`) is applied as of each rebalance date, e.g. "top N by trailing 30-day DEX volume among tokens ≥ 90 days old with ≥ $X pool liquidity, excluding stablecoins and wrapped majors". Tokens that later died or were rugged stay in for the periods they qualified. Parameters: Q-13.
+| Class | Definition (rule-based, point-in-time) | Pilot members | Native data | Key risks |
+|-------|----------------------------------------|---------------|-------------|-----------|
+| **Majors** | Curated list of large-cap, institutionally held assets [DEFAULT: BTC, ETH, SOL], reviewed by Decision Log entry | **BTC, ETH, SOL** | Long CEX history; perp DEXs; wrapped forms on AMMs (WBTC/cbBTC, WETH, wSOL) | Regime dependence. Crowded, efficient markets. |
+| **Altcoins** | Established tokens, not Majors, meeting PIT thresholds [DEFAULT: ≥ 180 days since first trade, ≥ $X 30-day median daily volume or pool liquidity, listed on ≥ 1 major CEX or on-chain liquidity ≥ $Y] | Rule-selected basket [DEFAULT N = 20–30 per rebalance] | CEX + DEX | Delistings, unlock events, liquidity decay |
+| **Speculative tokens** (memecoins, launchpad and narrative tokens) | Tokens not meeting the Altcoin thresholds, or tagged meme/launchpad origin, or age < threshold | Rule-selected from the full on-chain population | **On-chain AMM** (usually where they trade first and mostly) | Very high death/rug rates, delisting, honeypots, insider supply, launch sniping/MEV, wash trading, tiny capacity |
 
-**Chains (initial):** Ethereum, Base, Arbitrum, Solana (D-014). Specific DEX venues per chain: Q-16.
+Class membership is evaluated **point-in-time**. A token can move between classes over its life, e.g. a speculative token that matures into an Altcoin. Every universe rule is versioned (`UNIV-<class>-vN`), and none is hand-picked by present-day popularity, since that builds in survivorship and hindsight bias. Parameters: Q-13.
+
+**Speculative-class rules.** Because these tokens die or get delisted at high rates:
+1. **Survivorship-free population.** The universe is built from on-chain token creation and pool-creation events, so it includes every token that ever existed and met the PIT rule, alive or dead. CEX listing sets aren't used to define this universe: CEX listing is itself a survivor filter and an event.
+2. **Death is a first-class event.** When liquidity is pulled, trading halts, or the token becomes unsellable, positions exit at the **realizable** price: simulated sale into the remaining liquidity, which can be ~100% loss. Last traded price is never used.
+3. **Graveyard check (mandatory).** Strategies must hold up on the full population, including dead tokens. A strategy that only works on survivors is rejected (§9.4).
+4. **Lifecycle statistics.** Reports include survival curves and hazard rates for the universe tested, so the reader sees the base rate of failure.
+5. **Capacity realism.** Size is capped by on-chain liquidity at entry *and* at exit, including thin exit liquidity.
+6. **Separate trial families and an explicit limitations section** in every report touching this class.
+
+**Data-source fit by class.** Proxy mode (§12.1) is generally **not valid** for speculative tokens, since they usually trade first or only on-chain. Their native on-chain history is complete and free, so they're researched in native DEX mode.
+
+**Chains (initial):** Ethereum, Base, Arbitrum, Solana (D-014). **Execution venues** also include on-chain order-book perp DEXs (e.g. Lighter, Hyperliquid). Specific venues: Q-16.
 
 ### 13.2 Timescales
 
@@ -909,6 +1023,10 @@ spec_hash: sha256:...
 config_hash: sha256:...
 data_snapshot: sha256:...
 data_fidelity: bar_1h
+evaluation_mode: proxy            # native | proxy
+execution_venue: lighter_perp
+basis_model: basis-cex-lighter@0.2   # proxy mode only
+asset_class: altcoin
 params: {lookback_hours: 24, holding_hours: 12}
 seed: 42
 requested_by: {agent: analyst-xsec-01, model: provider-x/model-a-2026-09, call_ids: [...]}
@@ -943,19 +1061,20 @@ The core (agents, model gateway, lifecycle, Trial Registry, Stat Gates, ledger, 
 
 ---
 
-## 17. Proposed Technology Stack
+## 17. Technology Stack
 
-**[OPEN — Q-7]**
+The core stack is confirmed (D-023). Workflow orchestration and distributed compute are still open (Q-17). Performance design is in §10.6.
 
-| Area | Proposal | Rationale |
-|------|----------|-----------|
-| Language | Python for research, agents, and the library. Rust (PyO3) later for hot paths (CLMM simulation, tick aggregation). | Ecosystem; speed where needed |
-| Data | Parquet on object or local storage. DuckDB / Polars for query and compute. | Columnar, fast, cheap, local-first |
+| Area | Choice | Rationale |
+|------|--------|-----------|
+| Language | Python for research, agents, and the library. **Rust (PyO3)** for hot paths (event-driven engine core, order-book replay, CLMM math, tick aggregation). Numba for intermediate loops. | Ecosystem + speed where it matters |
+| Data | Parquet + Apache Arrow. **Polars** (lazy) and **DuckDB** for query and compute. | Columnar, zero-copy, out-of-core, local-first |
 | Metadata stores | Postgres for the Trial Registry, Ledger index, Request tracker, Model Registry history, KB metadata. pgvector for semantic search (KB, operator catalog). | Transactional integrity |
-| Model access | In-house **Model Gateway** with provider adapters. Optionally wraps an existing multi-provider library behind our interface (Q-15). | Provider neutrality (§6) |
+| Model access | In-house **Model Gateway** with four adapters (§6.1a). Optionally wraps an existing multi-provider library behind our interface (Q-15). | Provider neutrality (§6) |
 | Agent runtime | Thin in-house agent loop. Tools exposed as **MCP** servers (engine, data, registry, KB, reports). | Provider-neutral tools; permissions enforced on our side (D-018) |
-| Orchestration | Durable workflow engine for lifecycle state (e.g. Temporal, Prefect, or a lightweight custom state machine) | Long-running, resumable research |
-| Testing | pytest, Hypothesis (property-based), mutmut or similar (mutation), coverage gates in CI | Library certification (§10.5) |
+| Orchestration | Durable workflow engine for lifecycle state (e.g. Temporal, Prefect, or a lightweight custom state machine) **[OPEN — Q-17]** | Long-running, resumable research |
+| Distributed compute | Local process pool first; Ray or Dask when scaling out **[OPEN — Q-17]** | §10.6 |
+| Testing | pytest, Hypothesis (property-based), mutation testing, coverage gates, benchmark suite in CI | Certification (§10.5) and performance regression (§10.6) |
 | Sandboxing | Containerized strategy execution, no network, import allowlist | Safety + leakage control |
 | Reporting | Markdown + HTML reports generated from ledger data | R1 enforcement |
 
@@ -965,13 +1084,13 @@ The core (agents, model gateway, lifecycle, Trial Registry, Stat Gates, ledger, 
 
 | Phase | Name | Scope | Exit criteria |
 |-------|------|-------|---------------|
-| 0 | **Design** | This document. Resolve critical open questions. | Q-7, Q-11, Q-12 decided |
-| 1 | **Data foundation** | Connector framework, format adapters, raw archive, normalized PIT store, QA. Tier A (BTC/ETH/SOL) OHLCV + tick data from free endpoints/files. Instrument master. | Multi-year reconciled Tier A history at tick and bar level, with QA report |
-| 2 | **Core library & engine certification** | Data API, operators, screening engine, reference oracle, integrity checks, seeded-defect canaries, Trial Registry, Ledger, Stat Gate Service | Certification suite green. Canaries 100% detected. Null strategies rejected at the expected rate. |
-| 3 | **Model gateway & agent MVP** | Gateway with ≥ 2 provider/model options, registry, role profiles, initial QAM-Bench. Director + 1 desk + Validation Office + Reporter. Request intake. | One human request answered end-to-end with a full report |
-| 4 | **High-fidelity & DEX data** | On-chain connectors (EVM + Solana), AMM-exact simulation, gas/MEV models, Tier B universe | Simulated fills match a sample of real historical trades within tolerance |
+| 0 | **Design** | This document. Resolve critical open questions. | Q-12 (first providers) and Q-16 (first execution venues) decided |
+| 1 | **Data foundation** | Connector framework, format adapters, raw archive, normalized PIT store, QA, instrument master. Majors (BTC/ETH/SOL) CEX OHLCV + tick history. **Forward recorders on target DEX venues started immediately** (§11.8). Hyperliquid archive ingestion. Audit of delisted-symbol coverage per CEX source. | Multi-year reconciled Majors history at tick and bar level, recorders running, QA report |
+| 2 | **Core library & engine certification** | Data API, operators, screening engine, reference oracle, integrity checks, seeded-defect canaries, Trial Registry, Ledger, Stat Gate Service, performance benchmark suite, basis model v1 | Certification suite green. Canaries 100% detected. Null strategies rejected at the expected rate. Performance budgets met. |
+| 3 | **Model gateway & agent MVP** | Gateway with native adapters for the first providers + generic OpenAI-compatible adapter, registry, role profiles, initial QAM-Bench. Director + 1 desk + Validation Office + Reporter. Request intake. | One human request answered end-to-end with a full report |
+| 4 | **High-fidelity & on-chain data** | On-chain AMM connectors (EVM + Solana), AMM-exact and order-book simulation, gas/MEV models, Altcoin and Speculative universes from on-chain populations | Simulated fills match a sample of real historical trades within tolerance. Proxy fidelity test run on all overlap windows. |
 | 5 | **Pipeline calibration** | Null/positive injection, threshold tuning, model onboarding pipeline (shadow/canary) | Measured FDR and power meet §9.1 |
-| 6 | **Scale out** | More desks, bandit allocation, paper trading harness, WebSocket recorders, Platform Engineering agents handling LCRs | Steady-state throughput/cost KPIs established |
+| 6 | **Scale out** | More desks, bandit allocation, paper trading harness on DEX venues, distributed compute, Platform Engineering agents handling LCRs | Steady-state throughput/cost KPIs established |
 | 7 | **Vendors & next asset class** | Vendor connectors; first non-crypto adapter bundle | Same lifecycle runs unchanged on the new asset class |
 
 ---
@@ -998,6 +1117,11 @@ The core (agents, model gateway, lifecycle, Trial Registry, Stat Gates, ledger, 
 | D-016 | 2026-10-05 | No fixed initial desks. The research agenda is a candidate list. Desks open on demand, including from human requests. *(Resolves Q-5.)* | User direction (§13.4) | Accepted |
 | D-017 | 2026-10-05 | Human Research Request lane: structured intake, request→hypothesis mapping confirmation, depth levels, reserved budget share, standardized Investigation Reports | User direction (§7) | Accepted |
 | D-018 | 2026-10-05 | Agent runtime is a thin in-house loop over the Model Gateway, with tools as MCP servers. Supersedes the v0.1 proposal of a single-vendor agent SDK. | Provider neutrality; permissions enforced in our tool layer (§6.1) | Accepted |
+| D-019 | 2026-10-05 | Evaluation modes: **native** (CEX or DEX, where data venue = execution venue) and **proxy** (CEX research data, DEX execution). CEX is also an allowed execution venue. Proxy mode needs a basis model, adverse-basis fills, a proxy-error budget, a native-overlap fidelity test, a lead-lag guard, venue-specific funding, a longer paper period, and disclosure. *(Resolves Q-11.)* | Long fine-grained history mostly exists on CEXs, while DEX fees can be far lower. Proxy error becomes explicit and bounded instead of ignored. (§12.1) | Accepted |
+| D-020 | 2026-10-05 | Source acquisition order: (1) forward recorders on target DEX venues start immediately; (2) native archives (on-chain AMM history, Hyperliquid archive); (3) CEX history for depth; (4) vendors later | Native DEX history compounds over time. On-chain AMM history is complete and free. (§11.8) | Accepted |
+| D-021 | 2026-10-05 | Three asset classes, each with its own rules and trial families: **Majors** (BTC, ETH, SOL), **Altcoins**, **Speculative tokens** (memecoins/launchpad). Speculative universes are built from the full on-chain population, with realizable-exit death handling, a mandatory graveyard check, survival statistics, and native-only evaluation. Supersedes the Tier A/B split in D-014 (chains unchanged). *(Resolves Q-14.)* | User direction. Delisting/death propensity differs sharply by class. (§13.1) | Accepted |
+| D-022 | 2026-10-05 | Provider coverage through four adapters: Anthropic native, OpenAI native, Google Gemini native, and a generic OpenAI-compatible adapter (xAI, DeepSeek, Mistral, Kimi, GLM, Qwen, inference hosts, OpenRouter, local vLLM/Ollama). Registry records each provider's data policy, and confidential work routes only to acceptable providers or self-hosted models. *(Partially resolves Q-12; which providers to activate first stays open.)* | Broad coverage with few adapters. Native adapters keep provider-specific cost/quality features. (§6.1a) | Accepted |
+| D-023 | 2026-10-05 | Technology stack confirmed: Python + Rust (PyO3) / Numba hot paths, Parquet + Arrow, Polars + DuckDB, Postgres + pgvector, MCP tools, in-house gateway/agent loop. Performance architecture per §10.6. Orchestration and distributed compute deferred to Q-17. *(Resolves Q-7.)* | User approval, with emphasis on performance for expensive backtests (§10.6, §17) | Accepted |
 
 ---
 
@@ -1007,18 +1131,16 @@ The core (agents, model gateway, lifecycle, Trial Registry, Stat Gates, ledger, 
 |----|----------|-----------------|-----------|
 | Q-4 | Any latency-sensitive (`specialized`) strategies in a later phase? | Needs a separate infra track | Phase 6+ |
 | Q-6 | Add a cross-sectional (asset-level) holdout in addition to the time holdout? | More protection, smaller training universe | Phase 2 |
-| Q-7 | Confirm technology stack (§17) | — | Phase 1 |
 | Q-8 | Initial model assignments per role and LLM budget per period | Mechanism decided (D-007/D-008). Initial values pending Q-12 and the first QAM-Bench run. | Phase 3 |
 | Q-9 | Notional tiers for capacity analysis | e.g. $10k / $100k / $1M | Phase 4 |
 | Q-10 | Risk-management layer for paper trading (limits, kill switches) | Required before any live consideration | Phase 6 |
-| Q-11 | **CEX vs DEX:** The free long-history OHLC/tick data is likely from centralized exchanges. Is CEX data (a) only a research proxy for DEX-executed strategies (with a proxy-validity check, §12), or (b) also an allowed execution venue? | (b) broadens what's tradeable for an independent trader. (a) keeps the DEX focus strict. | Phase 1 |
-| Q-12 | Which LLM providers and API keys are available initially? | Determines the first adapters and the initial registry | Phase 3 |
-| Q-13 | Tier B universe rule parameters (N, min age, min liquidity, rebalance frequency) | Default proposal in §13.1 | Phase 4 |
-| Q-14 | Do the free endpoints provide history for delisted/dead assets? If not, how do we close the survivorship gap? | Listing-history reconstruction, on-chain data, user-supplied archives | Phase 1 |
-| Q-15 | Build the gateway's provider adapters ourselves, or wrap an existing multi-provider library behind our interface? | Build = control. Wrap = speed, but dependency risk. | Phase 3 |
-| Q-16 | Specific DEX venues per chain for the pilot | e.g. Uniswap v3/v4, Aerodrome (Base), Camelot (Arbitrum); Raydium, Orca, Meteora (Solana) | Phase 4 |
+| Q-12 | Which providers to activate first, with what budget? | Adapter coverage decided (D-022). Options in §6.1a. Suggestion: one frontier provider natively plus the OpenAI-compatible adapter (cheap open-weight models for high-volume roles), then a second frontier provider for validator lineage diversity. | Phase 3 |
+| Q-13 | Class universe rule parameters (Altcoin thresholds, Speculative population definition and launchpads/chains covered, N, rebalance frequency) | Defaults in §13.1 | Phase 4 |
+| Q-15 | Build the gateway's provider adapters ourselves, or wrap an existing multi-provider library (e.g. LiteLLM) behind our interface? | Build = control and full native features. Wrap = speed, but dependency risk. Possible hybrid: own native adapters, library for the long tail. | Phase 3 |
+| Q-16 | First execution venues to model and record | Order-book perp DEXs (e.g. Lighter, Hyperliquid) and/or AMMs per chain (e.g. Uniswap v3/v4, Aerodrome; Raydium, Orca, Meteora). Decides which forward recorders start first (§11.8). | Phase 1 (recorders) |
+| Q-17 | Workflow orchestration engine and distributed compute framework | Temporal / Prefect / custom; Ray / Dask / process pool | Phase 2–3 |
 
-*Resolved:* Q-1 → D-014, Q-2 → D-012, Q-3 → D-015, Q-5 → D-016.
+*Resolved:* Q-1 → D-014, Q-2 → D-012, Q-3 → D-015, Q-5 → D-016, Q-7 → D-023, Q-11 → D-019, Q-14 → D-021. Q-12 partially → D-022.
 
 ---
 
@@ -1028,6 +1150,7 @@ The core (agents, model gateway, lifecycle, Trial Registry, Stat Gates, ledger, 
 |---------|------|--------|---------|
 | 0.1.0 | 2026-10-05 | Claude (with @brandongla) | Initial draft: goals, principles, architecture, agent hierarchy, lifecycle, false-positive framework, DEX data/simulation requirements, research agenda, efficiency, extensibility, roadmap, decisions, open questions. |
 | 0.2.0 | 2026-10-05 | Claude (with @brandongla) | Added §6 Model Selection & Provider Abstraction (gateway, registry, role profiles, QAM-Bench, model onboarding). Added §7 Human Research Requests & Reporting. Added §10 Core Research Library & Engine Integrity (declarative strategies, sandbox, causality tests, LCR process, certification), replacing the old engine section. Expanded §11 Data Platform (data kinds, raw/normalized/derived layers, connectors, format adapters, bar timestamp convention, granularity-aware fills, instrument master). Added §13 Pilot Universe (BTC/ETH/SOL + rule-based small caps; chains), timescale policy, and infra classes. Added Platform Engineering and Reporter roles, P11–P13, G6–G7, R6. Decisions D-007–D-018. Resolved Q-1, Q-2, Q-3, Q-5. New Q-11–Q-16. Sections renumbered. |
+| 0.3.0 | 2026-10-05 | Claude (with @brandongla) | Added §12.1 evaluation modes (native CEX/DEX, proxy) with proxy-mode controls (basis model, proxy-error budget, fidelity test, lead-lag guard). Added §11.8 source acquisition strategy (forward recorders, on-chain AMM history, Hyperliquid archive). Replaced Tier A/B with three asset classes (Majors, Altcoins, Speculative tokens) and speculative-class survivorship rules (§13.1). Added §6.1a provider landscape snapshot, four-adapter strategy, and data-policy routing. Added §10.6 performance architecture. Confirmed tech stack (§17). Added order-book DEX execution requirements (§12.2). Updated roadmap, robustness suite (proxy fidelity, graveyard check), and pre-registration fields (asset_class, evaluation_mode). Decisions D-019–D-023. Resolved Q-7, Q-11, Q-14; Q-12 partially. New Q-17. |
 
 ---
 
@@ -1035,6 +1158,9 @@ The core (agents, model gateway, lifecycle, Trial Registry, Stat Gates, ledger, 
 
 | Term | Definition |
 |------|-----------|
+| **Basis (venue basis)** | Price difference between the same asset on two venues (e.g. DEX vs CEX). Modeled explicitly in proxy mode (§12.1). |
+| **Evaluation mode** | `native` (research data from the execution venue) or `proxy` (research data from another venue, usually a CEX) (§12.1). |
+| **Graveyard check** | Requirement that a strategy works on the full population including dead, rugged, and delisted tokens (§13.1). |
 | **Admissible result** | A result produced by the certified engine path and recorded in the ledger. Only these can be cited, pass gates, or appear in reports. |
 | **CSCV** | Combinatorially Symmetric Cross-Validation. Used to estimate PBO. |
 | **DSR** | Deflated Sharpe Ratio. The probability that the true Sharpe is > 0 after adjusting for the number of trials and non-normal returns. |
@@ -1049,6 +1175,7 @@ The core (agents, model gateway, lifecycle, Trial Registry, Stat Gates, ledger, 
 | **PBO** | Probability of Backtest Overfitting. |
 | **PIT** | Point-in-time. |
 | **QAM-Bench** | Private, role-specific evaluation suite used to select and onboard models (§6.4). |
+| **Speculative tokens** | Asset class for memecoins, launchpad and narrative tokens with high death/delisting rates (§13.1). |
 | **Trial family** | A group of related trials sharing a multiple-testing budget. |
 | **Truncation invariance** | Causality test: signals at time *t* must be identical whether computed on data truncated at *t* or on full data. |
 | **Vault** | The reserved holdout dataset, accessible only through the Gatekeeper. |
