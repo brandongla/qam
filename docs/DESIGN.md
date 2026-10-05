@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft (living document) |
-| **Version** | 0.4.0 |
+| **Version** | 0.5.0 |
 | **Last updated** | 2026-10-05 |
 | **Owner** | @brandongla |
 | **Initial scope** | Cryptocurrencies, focused on decentralized exchanges (DEXs) |
@@ -1086,11 +1086,23 @@ The core stack is confirmed (D-023). Workflow orchestration and distributed comp
 | Metadata stores | Postgres for the Trial Registry, Ledger index, Request tracker, Model Registry history, KB metadata. pgvector for semantic search (KB, operator catalog). | Transactional integrity |
 | Model access | In-house **Model Gateway**. MVP: Anthropic native + OpenRouter. Later: OpenAI and Gemini native, direct hosts, local (§6.1a, D-024). Optionally wraps an existing multi-provider library behind our interface (Q-15). | Provider neutrality (§6) |
 | Agent runtime | Thin in-house agent loop. Tools exposed as **MCP** servers (engine, data, registry, KB, reports). | Provider-neutral tools; permissions enforced on our side (D-018) |
-| Orchestration | Durable workflow engine for lifecycle state (e.g. Temporal, Prefect, or a lightweight custom state machine) **[OPEN — Q-17]** | Long-running, resumable research |
-| Distributed compute | Local process pool first; Ray or Dask when scaling out **[OPEN — Q-17]** | §10.6 |
+| Orchestration | Custom Postgres-backed lifecycle state machine + Postgres task queue, behind an `Orchestrator` interface. Temporal is the planned upgrade path (D-026). | Minimal dependencies at MVP scale; contained migration later |
+| Distributed compute | `Executor` interface with configurable backends. MVP: local process pool. Later: Ray / cloud batch, selected by config (D-026). | §10.6 |
 | Testing | pytest, Hypothesis (property-based), mutation testing, coverage gates, benchmark suite in CI | Certification (§10.5) and performance regression (§10.6) |
 | Sandboxing | Containerized strategy execution, no network, import allowlist | Safety + leakage control |
 | Reporting | Markdown + HTML reports generated from ledger data | R1 enforcement |
+
+### 17.1 Deployment (MVP)
+
+The MVP runs on a single **Oracle Cloud VM** provided by the user (D-027). Deployment options get expanded after the MVP.
+
+- **Services on the VM:** forward recorders (Lighter, Hyperliquid) as supervised long-running services with auto-restart, Postgres, the task-queue worker(s), and the local process-pool executor.
+- **Recorder reliability:** continuous operation with reconnect/backoff, sequence-gap and heartbeat detection, and gaps logged in the data catalog (gaps are data, not silence). Health alerts when a stream stalls.
+- **Durability:** raw recordings are rotated into compressed files and periodically copied off the VM to a backup target (Q-18). The VM disk is not the only copy.
+- **Secrets:** API keys live in an environment file or secret store on the VM, never in the repo.
+- **Access model:** deployment is done by a scripted installer run from the repository. Where Claude needs access, use a dedicated low-privilege deploy user with its own key. Never share personal credentials in chat.
+- **Development/testing:** this development sandbox can't reach the venue APIs. Recorders are tested here against captured message fixtures, then smoke-tested live on the VM.
+- **Free-tier caveats (to verify):** free cloud VMs may be reclaimed by the provider when idle, and have limited disk and network. Recorder footprint and CPU utilization are monitored, and the recording scope is sized to the VM (Q-18).
 
 ---
 
@@ -1137,6 +1149,9 @@ The core stack is confirmed (D-023). Workflow orchestration and distributed comp
 | D-022 | 2026-10-05 | Provider coverage through four adapters: Anthropic native, OpenAI native, Google Gemini native, and a generic OpenAI-compatible adapter (xAI, DeepSeek, Mistral, Kimi, GLM, Qwen, inference hosts, OpenRouter, local vLLM/Ollama). Registry records each provider's data policy, and confidential work routes only to acceptable providers or self-hosted models. *(Partially resolves Q-12; which providers to activate first stays open.)* | Broad coverage with few adapters. Native adapters keep provider-specific cost/quality features. (§6.1a) | Accepted |
 | D-023 | 2026-10-05 | Technology stack confirmed: Python + Rust (PyO3) / Numba hot paths, Parquet + Arrow, Polars + DuckDB, Postgres + pgvector, MCP tools, in-house gateway/agent loop. Performance architecture per §10.6. Orchestration and distributed compute deferred to Q-17. *(Resolves Q-7.)* | User approval, with emphasis on performance for expensive backtests (§10.6, §17) | Accepted |
 | D-024 | 2026-10-05 | MVP model providers: **Anthropic native** + **OpenRouter** (through the OpenAI-compatible adapter) for all other models. OpenAI/Gemini native, direct hosts, and local models deferred to after the MVP. OpenRouter entries pin model + upstream host, disable silent fallback, filter by data policy, and record actual capabilities. *(Resolves Q-12.)* | User direction: maximum model coverage for the least adapter work. Native features where we use them most. (§6.1a) | Accepted |
+| D-025 | 2026-10-05 | First execution venues: **Lighter** and **Hyperliquid** (order-book perps). Recorders start in Phase 1: trades, BBO, funding, mark/index, OI for all markets; top-N L2 snapshots for Majors and a liquid Altcoin subset; full-depth deltas for Majors. Hyperliquid archive backfill. On-chain AMMs (Solana, then Base) in Phase 4. All venue types remain in long-term scope. *(Resolves Q-16.)* | User has trading experience on both. Order-book history can't be backfilled, AMM history can. (§20.1) | Accepted |
+| D-026 | 2026-10-05 | Orchestration: custom Postgres-backed state machine + task queue behind an `Orchestrator` interface (Temporal is the upgrade path). Compute: `Executor` interface with **configurable backends**. MVP backend is a local process pool. *(Resolves Q-17.)* | Simplest thing that works at MVP scale, with contained migration paths (§20.2) | Accepted |
+| D-027 | 2026-10-05 | MVP deployment target: a single user-provided Oracle Cloud VM. Broader deployment options after the MVP. | User direction (§17.1) | Accepted |
 
 ---
 
@@ -1151,12 +1166,11 @@ The core stack is confirmed (D-023). Workflow orchestration and distributed comp
 | Q-10 | Risk-management layer for paper trading (limits, kill switches) | Required before any live consideration | Phase 6 |
 | Q-13 | Class universe rule parameters (Altcoin thresholds, Speculative population definition and launchpads/chains covered, N, rebalance frequency) | Defaults in §13.1 | Phase 4 |
 | Q-15 | Build the gateway's provider adapters ourselves, or wrap an existing multi-provider library (e.g. LiteLLM) behind our interface? | Build = control and full native features. Wrap = speed, but dependency risk. Possible hybrid: own native adapters, library for the long tail. | Phase 3 |
-| Q-16 | First execution venues: which venues get forward recorders now, and which execution models get built first? | See decision brief §20.1. Recommendation: Lighter + Hyperliquid recorders now; on-chain AMMs (Solana, Base) with the Speculative class in Phase 4. | **Now** (recorders only capture data from their start date) |
-| Q-17 | (a) Workflow orchestration engine, (b) distributed compute framework | See decision brief §20.2. Recommendation: Postgres-backed state machine + task queue, plus a local process pool, behind interfaces. Revisit at Phase 6. Input needed: where compute runs (own hardware vs cloud) and budget. | Phase 2 (interfaces); Phase 6 (scale-out) |
+| Q-18 | MVP VM specifics: shape (CPU arch, cores, RAM), disk size, OS, and backup target for recordings | Needed to size recording scope and retention, and to build for the right CPU architecture (e.g. ARM64). | Before recorder deployment |
 
-*Resolved:* Q-1 → D-014, Q-2 → D-012, Q-3 → D-015, Q-5 → D-016, Q-7 → D-023, Q-11 → D-019, Q-12 → D-022 + D-024, Q-14 → D-021.
+*Resolved:* Q-1 → D-014, Q-2 → D-012, Q-3 → D-015, Q-5 → D-016, Q-7 → D-023, Q-11 → D-019, Q-12 → D-022 + D-024, Q-14 → D-021, Q-16 → D-025, Q-17 → D-026.
 
-### 20.1 Decision brief: Q-16 (first execution venues)
+### 20.1 Decision brief: Q-16 (first execution venues): decided in D-025
 
 **What is being decided.** Which specific venues (exchange × market type × chain) are first-class **execution venues** for the MVP. This choice determines:
 1. **Which forward recorders start now.** This is the time-critical part: a recorder only captures data from the day it starts.
@@ -1188,7 +1202,7 @@ The core stack is confirmed (D-023). Workflow orchestration and distributed comp
 
 **Needed from the user:** confirm Lighter + Hyperliquid, and confirm you'd be willing and able to trade there.
 
-### 20.2 Decision brief: Q-17 (orchestration & distributed compute)
+### 20.2 Decision brief: Q-17 (orchestration & distributed compute): decided in D-026
 
 Two independent decisions:
 
@@ -1231,6 +1245,7 @@ Parameter sweeps, CV folds, CSCV, robustness variants, and null injection multip
 | 0.2.0 | 2026-10-05 | Claude (with @brandongla) | Added §6 Model Selection & Provider Abstraction (gateway, registry, role profiles, QAM-Bench, model onboarding). Added §7 Human Research Requests & Reporting. Added §10 Core Research Library & Engine Integrity (declarative strategies, sandbox, causality tests, LCR process, certification), replacing the old engine section. Expanded §11 Data Platform (data kinds, raw/normalized/derived layers, connectors, format adapters, bar timestamp convention, granularity-aware fills, instrument master). Added §13 Pilot Universe (BTC/ETH/SOL + rule-based small caps; chains), timescale policy, and infra classes. Added Platform Engineering and Reporter roles, P11–P13, G6–G7, R6. Decisions D-007–D-018. Resolved Q-1, Q-2, Q-3, Q-5. New Q-11–Q-16. Sections renumbered. |
 | 0.3.0 | 2026-10-05 | Claude (with @brandongla) | Added §12.1 evaluation modes (native CEX/DEX, proxy) with proxy-mode controls (basis model, proxy-error budget, fidelity test, lead-lag guard). Added §11.8 source acquisition strategy (forward recorders, on-chain AMM history, Hyperliquid archive). Replaced Tier A/B with three asset classes (Majors, Altcoins, Speculative tokens) and speculative-class survivorship rules (§13.1). Added §6.1a provider landscape snapshot, four-adapter strategy, and data-policy routing. Added §10.6 performance architecture. Confirmed tech stack (§17). Added order-book DEX execution requirements (§12.2). Updated roadmap, robustness suite (proxy fidelity, graveyard check), and pre-registration fields (asset_class, evaluation_mode). Decisions D-019–D-023. Resolved Q-7, Q-11, Q-14; Q-12 partially. New Q-17. |
 | 0.4.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-12 (D-024): MVP providers are Anthropic native + OpenRouter, with OpenRouter pinning/data-policy/conformance requirements (§6.1a). Added decision briefs for Q-16 (execution venues and recorders, §20.1) and Q-17 (orchestration and distributed compute, §20.2) with recommendations. Updated tech stack and roadmap Phase 3. |
+| 0.5.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-16 (D-025: Lighter + Hyperliquid first, recorders in Phase 1) and Q-17 (D-026: custom Postgres orchestrator, configurable executor backends with a local pool for the MVP). Added §17.1 MVP deployment on a user-provided Oracle Cloud VM (D-027). New Q-18 (VM specifics and backup target). |
 
 ---
 
