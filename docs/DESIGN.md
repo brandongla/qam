@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft (living document) |
-| **Version** | 0.7.0 |
+| **Version** | 0.7.1 |
 | **Last updated** | 2026-10-05 |
 | **Owner** | @brandongla |
 | **Initial scope** | Cryptocurrencies, focused on decentralized exchanges (DEXs) |
@@ -1126,6 +1126,7 @@ The MVP runs on a single **Oracle Cloud VM** provided by the user (D-027). Deplo
 - **Verification manifest.** Every closed file gets a SHA-256 in a manifest on the VM. The backup job verifies checksums after transfer and writes back an acknowledgement.
 - **VM retention tied to confirmed backups.** A file is eligible for deletion from the VM only after its checksum has been acknowledged by the backup, *and* the disk is above a usage threshold [DEFAULT 70%]. Until then the VM keeps everything, so a local machine that's off for days loses nothing.
 - **Alerts.** Warn when unacknowledged data exceeds N days [DEFAULT 3] or disk usage passes the threshold. Either one means the local machine needs to sync.
+- **Client environment: Windows + WSL2.** The backup script runs inside WSL2 (rsync over SSH, with an SSH key stored in WSL). WSL2 doesn't run cron unless a WSL session is active, so **Windows Task Scheduler** triggers it: at logon and on an interval, it runs `wsl.exe -d <distro> -- <backup script>`. Backups are written to a **Windows drive path** (e.g. `/mnt/d/qam-backup`), not inside the WSL virtual disk, so they survive a WSL distro reset and Windows backup tools can see them.
 - **Known limitation.** The backup depends on the local machine being on periodically, and it's a single extra copy. Accepted for the MVP. Upgrade path: add a cloud object store target in the same `rclone` config.
 
 ---
@@ -1177,7 +1178,7 @@ The MVP runs on a single **Oracle Cloud VM** provided by the user (D-027). Deplo
 | D-026 | 2026-10-05 | Orchestration: custom Postgres-backed state machine + task queue behind an `Orchestrator` interface (Temporal is the upgrade path). Compute: `Executor` interface with **configurable backends**. MVP backend is a local process pool. *(Resolves Q-17.)* | Simplest thing that works at MVP scale, with contained migration paths (§20.2) | Accepted |
 | D-027 | 2026-10-05 | MVP deployment target: a single user-provided Oracle Cloud VM. Broader deployment options after the MVP. | User direction (§17.1) | Accepted |
 | D-028 | 2026-10-05 | MVP VM is ARM64, 4 CPU / 24 GB RAM. All code, dependencies, CI, and any containers support **both linux/arm64 and linux/amd64**. Idle reclamation isn't treated as a risk for this account. *(Resolves Q-18; backup target split out as Q-19.)* | User direction; avoids architecture lock-in (§17.1) | Accepted |
-| D-029 | 2026-10-05 | MVP backups go to the user's local machine via pull-based SSH sync of closed, checksummed recording files. VM deletes data only after acknowledged backup and above a disk threshold. Cloud object storage deferred until after the MVP. *(Resolves Q-19.)* | User direction: free-tier cloud limits likely too low. Zero cost for the MVP. (§17.1) | Accepted |
+| D-029 | 2026-10-05 | MVP backups go to the user's local machine via pull-based SSH sync of closed, checksummed recording files (client in WSL2, triggered by Windows Task Scheduler, stored on a Windows drive). VM deletes data only after acknowledged backup and above a disk threshold. Cloud object storage deferred until after the MVP. *(Resolves Q-19.)* | User direction: free-tier cloud limits likely too low. Zero cost for the MVP. (§17.1) | Accepted |
 
 ---
 
@@ -1273,6 +1274,7 @@ Parameter sweeps, CV folds, CSCV, robustness variants, and null injection multip
 | 0.5.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-16 (D-025: Lighter + Hyperliquid first, recorders in Phase 1) and Q-17 (D-026: custom Postgres orchestrator, configurable executor backends with a local pool for the MVP). Added §17.1 MVP deployment on a user-provided Oracle Cloud VM (D-027). New Q-18 (VM specifics and backup target). |
 | 0.6.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-18 (D-028): ARM64 4-CPU/24 GB VM, dual-architecture (arm64 + amd64) build requirement. Added recording-volume estimate and backup options with a recommendation (§17.1). New Q-19 (backup target). |
 | 0.7.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-19 (D-029): MVP backups pulled to the user's local machine, with checksum manifest, acknowledgement-gated VM retention, and alerts (§17.1). |
+| 0.7.1 | 2026-10-05 | Claude (with @brandongla) | Clarified the backup client environment: WSL2 + Windows Task Scheduler, backups stored on a Windows drive (§17.1). |
 
 ---
 
