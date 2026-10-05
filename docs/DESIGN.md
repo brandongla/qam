@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft (living document) |
-| **Version** | 0.6.0 |
+| **Version** | 0.7.0 |
 | **Last updated** | 2026-10-05 |
 | **Owner** | @brandongla |
 | **Initial scope** | Cryptocurrencies, focused on decentralized exchanges (DEXs) |
@@ -1116,7 +1116,17 @@ The MVP runs on a single **Oracle Cloud VM** provided by the user (D-027). Deplo
 | Cloudflare R2 | Free tier, no egress fees | Independent provider, free reads for later analysis elsewhere | Another account to manage |
 | User's own machine/NAS (pull via rsync) | Free | Full control, offline copy | Depends on that machine being on. Manual. |
 
-**Recommendation:** nightly `rclone` sync of closed, compressed files to **one independent object store** (B2 or R2), with checksums and a monthly restore test. Optionally add Oracle Object Storage as a second, fast copy. At the estimated volumes, cost stays in the single-digit dollars per month even after a year of accumulation.
+**MVP decision (D-029):** back up to the **user's local machine** (below). The cloud object-store options remain the planned upgrade once volumes and budget justify it.
+
+**Original recommendation (deferred):** nightly `rclone` sync of closed, compressed files to **one independent object store** (B2 or R2), with checksums and a monthly restore test. Optionally add Oracle Object Storage as a second, fast copy. At the estimated volumes, cost stays in the single-digit dollars per month even after a year of accumulation.
+
+**MVP backup design (local machine, pull-based):**
+- **Pull, not push.** The local machine pulls from the VM over SSH (`rsync`, or `rclone` over SFTP), on a schedule or whenever it's on. The VM holds no credentials to the user's machine, and the local machine needs no open inbound ports.
+- **Only closed files.** Recorders rotate files (e.g. hourly). Only closed, compressed files are synced. Files are never modified after closing.
+- **Verification manifest.** Every closed file gets a SHA-256 in a manifest on the VM. The backup job verifies checksums after transfer and writes back an acknowledgement.
+- **VM retention tied to confirmed backups.** A file is eligible for deletion from the VM only after its checksum has been acknowledged by the backup, *and* the disk is above a usage threshold [DEFAULT 70%]. Until then the VM keeps everything, so a local machine that's off for days loses nothing.
+- **Alerts.** Warn when unacknowledged data exceeds N days [DEFAULT 3] or disk usage passes the threshold. Either one means the local machine needs to sync.
+- **Known limitation.** The backup depends on the local machine being on periodically, and it's a single extra copy. Accepted for the MVP. Upgrade path: add a cloud object store target in the same `rclone` config.
 
 ---
 
@@ -1167,6 +1177,7 @@ The MVP runs on a single **Oracle Cloud VM** provided by the user (D-027). Deplo
 | D-026 | 2026-10-05 | Orchestration: custom Postgres-backed state machine + task queue behind an `Orchestrator` interface (Temporal is the upgrade path). Compute: `Executor` interface with **configurable backends**. MVP backend is a local process pool. *(Resolves Q-17.)* | Simplest thing that works at MVP scale, with contained migration paths (§20.2) | Accepted |
 | D-027 | 2026-10-05 | MVP deployment target: a single user-provided Oracle Cloud VM. Broader deployment options after the MVP. | User direction (§17.1) | Accepted |
 | D-028 | 2026-10-05 | MVP VM is ARM64, 4 CPU / 24 GB RAM. All code, dependencies, CI, and any containers support **both linux/arm64 and linux/amd64**. Idle reclamation isn't treated as a risk for this account. *(Resolves Q-18; backup target split out as Q-19.)* | User direction; avoids architecture lock-in (§17.1) | Accepted |
+| D-029 | 2026-10-05 | MVP backups go to the user's local machine via pull-based SSH sync of closed, checksummed recording files. VM deletes data only after acknowledged backup and above a disk threshold. Cloud object storage deferred until after the MVP. *(Resolves Q-19.)* | User direction: free-tier cloud limits likely too low. Zero cost for the MVP. (§17.1) | Accepted |
 
 ---
 
@@ -1181,9 +1192,8 @@ The MVP runs on a single **Oracle Cloud VM** provided by the user (D-027). Deplo
 | Q-10 | Risk-management layer for paper trading (limits, kill switches) | Required before any live consideration | Phase 6 |
 | Q-13 | Class universe rule parameters (Altcoin thresholds, Speculative population definition and launchpads/chains covered, N, rebalance frequency) | Defaults in §13.1 | Phase 4 |
 | Q-15 | Build the gateway's provider adapters ourselves, or wrap an existing multi-provider library (e.g. LiteLLM) behind our interface? | Build = control and full native features. Wrap = speed, but dependency risk. Possible hybrid: own native adapters, library for the long tail. | Phase 3 |
-| Q-19 | Backup target for raw recordings | Options and recommendation in §17.1. Decide at recorder deployment. | Before recorders go live |
 
-*Resolved:* Q-1 → D-014, Q-2 → D-012, Q-3 → D-015, Q-5 → D-016, Q-7 → D-023, Q-11 → D-019, Q-12 → D-022 + D-024, Q-14 → D-021, Q-16 → D-025, Q-17 → D-026, Q-18 → D-028.
+*Resolved:* Q-1 → D-014, Q-2 → D-012, Q-3 → D-015, Q-5 → D-016, Q-7 → D-023, Q-11 → D-019, Q-12 → D-022 + D-024, Q-14 → D-021, Q-16 → D-025, Q-17 → D-026, Q-18 → D-028, Q-19 → D-029.
 
 ### 20.1 Decision brief: Q-16 (first execution venues): decided in D-025
 
@@ -1262,6 +1272,7 @@ Parameter sweeps, CV folds, CSCV, robustness variants, and null injection multip
 | 0.4.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-12 (D-024): MVP providers are Anthropic native + OpenRouter, with OpenRouter pinning/data-policy/conformance requirements (§6.1a). Added decision briefs for Q-16 (execution venues and recorders, §20.1) and Q-17 (orchestration and distributed compute, §20.2) with recommendations. Updated tech stack and roadmap Phase 3. |
 | 0.5.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-16 (D-025: Lighter + Hyperliquid first, recorders in Phase 1) and Q-17 (D-026: custom Postgres orchestrator, configurable executor backends with a local pool for the MVP). Added §17.1 MVP deployment on a user-provided Oracle Cloud VM (D-027). New Q-18 (VM specifics and backup target). |
 | 0.6.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-18 (D-028): ARM64 4-CPU/24 GB VM, dual-architecture (arm64 + amd64) build requirement. Added recording-volume estimate and backup options with a recommendation (§17.1). New Q-19 (backup target). |
+| 0.7.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-19 (D-029): MVP backups pulled to the user's local machine, with checksum manifest, acknowledgement-gated VM retention, and alerts (§17.1). |
 
 ---
 
