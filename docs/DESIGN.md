@@ -1137,6 +1137,7 @@ The core stack is confirmed (D-023). Workflow orchestration and distributed comp
 | D-022 | 2026-10-05 | Provider coverage through four adapters: Anthropic native, OpenAI native, Google Gemini native, and a generic OpenAI-compatible adapter (xAI, DeepSeek, Mistral, Kimi, GLM, Qwen, inference hosts, OpenRouter, local vLLM/Ollama). Registry records each provider's data policy, and confidential work routes only to acceptable providers or self-hosted models. *(Partially resolves Q-12; which providers to activate first stays open.)* | Broad coverage with few adapters. Native adapters keep provider-specific cost/quality features. (§6.1a) | Accepted |
 | D-023 | 2026-10-05 | Technology stack confirmed: Python + Rust (PyO3) / Numba hot paths, Parquet + Arrow, Polars + DuckDB, Postgres + pgvector, MCP tools, in-house gateway/agent loop. Performance architecture per §10.6. Orchestration and distributed compute deferred to Q-17. *(Resolves Q-7.)* | User approval, with emphasis on performance for expensive backtests (§10.6, §17) | Accepted |
 | D-024 | 2026-10-05 | MVP model providers: **Anthropic native** + **OpenRouter** (through the OpenAI-compatible adapter) for all other models. OpenAI/Gemini native, direct hosts, and local models deferred to after the MVP. OpenRouter entries pin model + upstream host, disable silent fallback, filter by data policy, and record actual capabilities. *(Resolves Q-12.)* | User direction: maximum model coverage for the least adapter work. Native features where we use them most. (§6.1a) | Accepted |
+
 ---
 
 ## 20. Open Questions
