@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft (living document) |
-| **Version** | 0.3.0 |
+| **Version** | 0.4.0 |
 | **Last updated** | 2026-10-05 |
 | **Owner** | @brandongla |
 | **Initial scope** | Cryptocurrencies, focused on decentralized exchanges (DEXs) |
@@ -312,6 +312,20 @@ flowchart LR
 4. **Generic OpenAI-compatible**: one configurable adapter covering xAI, DeepSeek, Mistral, Kimi, GLM, Qwen, inference hosts, OpenRouter, and local vLLM/Ollama. Declared capabilities may be more limited, and the conformance suite reports what each endpoint actually supports.
 
 Native adapters exist because the most valuable cost/quality features (prompt caching, reasoning controls, batch) differ by provider and are lost behind lowest-common-denominator interfaces.
+
+**MVP scope (D-024).** The MVP builds only two adapters:
+- **Anthropic native**: primary frontier provider, with full feature access.
+- **OpenRouter** via the generic OpenAI-compatible adapter: one key for every other model (OpenAI, Gemini, xAI, DeepSeek, Kimi, GLM, Qwen, …). It supplies cheap models for high-volume roles and non-Anthropic lineages for validator diversity (§6.3).
+
+OpenAI-native, Gemini-native, direct open-weight hosts, and local models come after the MVP. The registry and router stay unchanged, so moving a model from OpenRouter to a native adapter later is a config change.
+
+**OpenRouter-specific requirements:**
+1. **Pin the model and the upstream host.** OpenRouter can serve the same model name from different hosts, which may differ in quantization, context limits, and features. Registry entries pin the upstream provider(s) and disable silent provider fallback, so a model key always means the same deployment. Our gateway's own fallback rules (§6.3) handle outages.
+2. **Data policy.** Use OpenRouter's account and per-request settings to exclude upstream hosts whose data-retention or training policy is unacceptable. `confidential` work goes to Anthropic native until this is verified (§6.1a).
+3. **Feature conformance.** Tool calling, structured output, prompt caching, and reasoning controls vary by upstream model. The adapter conformance suite records the actual capabilities of each registry entry; router eligibility uses those results, not marketing claims.
+4. **Cost accounting.** Cost is recorded per call from the actual billed usage OpenRouter reports, including any platform fee.
+
+*(OpenRouter features named here are to be verified against its current documentation when the adapter is built.)*
 
 **Confidentiality (data policy).** Strategy ideas and results are proprietary. Each registry entry records the provider's `data_policy` (training use, retention period, zero-data-retention availability). Work items are tagged with a sensitivity level, and the router only sends `confidential` work (e.g. frozen candidates, validated strategy details) to models whose data policy is acceptable for it, or to self-hosted models.
 
@@ -1070,7 +1084,7 @@ The core stack is confirmed (D-023). Workflow orchestration and distributed comp
 | Language | Python for research, agents, and the library. **Rust (PyO3)** for hot paths (event-driven engine core, order-book replay, CLMM math, tick aggregation). Numba for intermediate loops. | Ecosystem + speed where it matters |
 | Data | Parquet + Apache Arrow. **Polars** (lazy) and **DuckDB** for query and compute. | Columnar, zero-copy, out-of-core, local-first |
 | Metadata stores | Postgres for the Trial Registry, Ledger index, Request tracker, Model Registry history, KB metadata. pgvector for semantic search (KB, operator catalog). | Transactional integrity |
-| Model access | In-house **Model Gateway** with four adapters (§6.1a). Optionally wraps an existing multi-provider library behind our interface (Q-15). | Provider neutrality (§6) |
+| Model access | In-house **Model Gateway**. MVP: Anthropic native + OpenRouter. Later: OpenAI and Gemini native, direct hosts, local (§6.1a, D-024). Optionally wraps an existing multi-provider library behind our interface (Q-15). | Provider neutrality (§6) |
 | Agent runtime | Thin in-house agent loop. Tools exposed as **MCP** servers (engine, data, registry, KB, reports). | Provider-neutral tools; permissions enforced on our side (D-018) |
 | Orchestration | Durable workflow engine for lifecycle state (e.g. Temporal, Prefect, or a lightweight custom state machine) **[OPEN — Q-17]** | Long-running, resumable research |
 | Distributed compute | Local process pool first; Ray or Dask when scaling out **[OPEN — Q-17]** | §10.6 |
@@ -1087,7 +1101,7 @@ The core stack is confirmed (D-023). Workflow orchestration and distributed comp
 | 0 | **Design** | This document. Resolve critical open questions. | Q-12 (first providers) and Q-16 (first execution venues) decided |
 | 1 | **Data foundation** | Connector framework, format adapters, raw archive, normalized PIT store, QA, instrument master. Majors (BTC/ETH/SOL) CEX OHLCV + tick history. **Forward recorders on target DEX venues started immediately** (§11.8). Hyperliquid archive ingestion. Audit of delisted-symbol coverage per CEX source. | Multi-year reconciled Majors history at tick and bar level, recorders running, QA report |
 | 2 | **Core library & engine certification** | Data API, operators, screening engine, reference oracle, integrity checks, seeded-defect canaries, Trial Registry, Ledger, Stat Gate Service, performance benchmark suite, basis model v1 | Certification suite green. Canaries 100% detected. Null strategies rejected at the expected rate. Performance budgets met. |
-| 3 | **Model gateway & agent MVP** | Gateway with native adapters for the first providers + generic OpenAI-compatible adapter, registry, role profiles, initial QAM-Bench. Director + 1 desk + Validation Office + Reporter. Request intake. | One human request answered end-to-end with a full report |
+| 3 | **Model gateway & agent MVP** | Gateway with Anthropic-native and OpenRouter adapters (D-024), registry, role profiles, initial QAM-Bench. Director + 1 desk + Validation Office + Reporter. Request intake. | One human request answered end-to-end with a full report |
 | 4 | **High-fidelity & on-chain data** | On-chain AMM connectors (EVM + Solana), AMM-exact and order-book simulation, gas/MEV models, Altcoin and Speculative universes from on-chain populations | Simulated fills match a sample of real historical trades within tolerance. Proxy fidelity test run on all overlap windows. |
 | 5 | **Pipeline calibration** | Null/positive injection, threshold tuning, model onboarding pipeline (shadow/canary) | Measured FDR and power meet §9.1 |
 | 6 | **Scale out** | More desks, bandit allocation, paper trading harness on DEX venues, distributed compute, Platform Engineering agents handling LCRs | Steady-state throughput/cost KPIs established |
@@ -1122,7 +1136,7 @@ The core stack is confirmed (D-023). Workflow orchestration and distributed comp
 | D-021 | 2026-10-05 | Three asset classes, each with its own rules and trial families: **Majors** (BTC, ETH, SOL), **Altcoins**, **Speculative tokens** (memecoins/launchpad). Speculative universes are built from the full on-chain population, with realizable-exit death handling, a mandatory graveyard check, survival statistics, and native-only evaluation. Supersedes the Tier A/B split in D-014 (chains unchanged). *(Resolves Q-14.)* | User direction. Delisting/death propensity differs sharply by class. (§13.1) | Accepted |
 | D-022 | 2026-10-05 | Provider coverage through four adapters: Anthropic native, OpenAI native, Google Gemini native, and a generic OpenAI-compatible adapter (xAI, DeepSeek, Mistral, Kimi, GLM, Qwen, inference hosts, OpenRouter, local vLLM/Ollama). Registry records each provider's data policy, and confidential work routes only to acceptable providers or self-hosted models. *(Partially resolves Q-12; which providers to activate first stays open.)* | Broad coverage with few adapters. Native adapters keep provider-specific cost/quality features. (§6.1a) | Accepted |
 | D-023 | 2026-10-05 | Technology stack confirmed: Python + Rust (PyO3) / Numba hot paths, Parquet + Arrow, Polars + DuckDB, Postgres + pgvector, MCP tools, in-house gateway/agent loop. Performance architecture per §10.6. Orchestration and distributed compute deferred to Q-17. *(Resolves Q-7.)* | User approval, with emphasis on performance for expensive backtests (§10.6, §17) | Accepted |
-
+| D-024 | 2026-10-05 | MVP model providers: **Anthropic native** + **OpenRouter** (through the OpenAI-compatible adapter) for all other models. OpenAI/Gemini native, direct hosts, and local models deferred to after the MVP. OpenRouter entries pin model + upstream host, disable silent fallback, filter by data policy, and record actual capabilities. *(Resolves Q-12.)* | User direction: maximum model coverage for the least adapter work. Native features where we use them most. (§6.1a) | Accepted |
 ---
 
 ## 20. Open Questions
@@ -1134,13 +1148,77 @@ The core stack is confirmed (D-023). Workflow orchestration and distributed comp
 | Q-8 | Initial model assignments per role and LLM budget per period | Mechanism decided (D-007/D-008). Initial values pending Q-12 and the first QAM-Bench run. | Phase 3 |
 | Q-9 | Notional tiers for capacity analysis | e.g. $10k / $100k / $1M | Phase 4 |
 | Q-10 | Risk-management layer for paper trading (limits, kill switches) | Required before any live consideration | Phase 6 |
-| Q-12 | Which providers to activate first, with what budget? | Adapter coverage decided (D-022). Options in §6.1a. Suggestion: one frontier provider natively plus the OpenAI-compatible adapter (cheap open-weight models for high-volume roles), then a second frontier provider for validator lineage diversity. | Phase 3 |
 | Q-13 | Class universe rule parameters (Altcoin thresholds, Speculative population definition and launchpads/chains covered, N, rebalance frequency) | Defaults in §13.1 | Phase 4 |
 | Q-15 | Build the gateway's provider adapters ourselves, or wrap an existing multi-provider library (e.g. LiteLLM) behind our interface? | Build = control and full native features. Wrap = speed, but dependency risk. Possible hybrid: own native adapters, library for the long tail. | Phase 3 |
-| Q-16 | First execution venues to model and record | Order-book perp DEXs (e.g. Lighter, Hyperliquid) and/or AMMs per chain (e.g. Uniswap v3/v4, Aerodrome; Raydium, Orca, Meteora). Decides which forward recorders start first (§11.8). | Phase 1 (recorders) |
-| Q-17 | Workflow orchestration engine and distributed compute framework | Temporal / Prefect / custom; Ray / Dask / process pool | Phase 2–3 |
+| Q-16 | First execution venues: which venues get forward recorders now, and which execution models get built first? | See decision brief §20.1. Recommendation: Lighter + Hyperliquid recorders now; on-chain AMMs (Solana, Base) with the Speculative class in Phase 4. | **Now** (recorders only capture data from their start date) |
+| Q-17 | (a) Workflow orchestration engine, (b) distributed compute framework | See decision brief §20.2. Recommendation: Postgres-backed state machine + task queue, plus a local process pool, behind interfaces. Revisit at Phase 6. Input needed: where compute runs (own hardware vs cloud) and budget. | Phase 2 (interfaces); Phase 6 (scale-out) |
 
-*Resolved:* Q-1 → D-014, Q-2 → D-012, Q-3 → D-015, Q-5 → D-016, Q-7 → D-023, Q-11 → D-019, Q-14 → D-021. Q-12 partially → D-022.
+*Resolved:* Q-1 → D-014, Q-2 → D-012, Q-3 → D-015, Q-5 → D-016, Q-7 → D-023, Q-11 → D-019, Q-12 → D-022 + D-024, Q-14 → D-021.
+
+### 20.1 Decision brief: Q-16 (first execution venues)
+
+**What is being decided.** Which specific venues (exchange × market type × chain) are first-class **execution venues** for the MVP. This choice determines:
+1. **Which forward recorders start now.** This is the time-critical part: a recorder only captures data from the day it starts.
+2. **Which execution simulator gets built first.** Order-book fills (§12.2) and AMM pool math are separate engineering efforts.
+3. **Which basis models are needed** for proxy mode (CEX ↔ each venue, §12.1).
+4. **Which instruments and position types are tradable.** Perps allow shorting and leverage. AMM spot is effectively long-only without extra lending infrastructure.
+5. **Where paper trading (G6) runs.**
+
+**Key insight: what must be recorded versus what can be backfilled.**
+- **On-chain AMM swaps** are permanently on-chain, so complete history can be reconstructed any time. **No urgency.**
+- **Order-book venues** (Lighter, Hyperliquid): order-book state, and often trades, aren't reconstructable later from free sources (except the parts Hyperliquid archives). **Every day not recorded is lost.**
+
+**Candidates:**
+
+| Venue | Type | Fees (snapshot, verify) | Native history | Shorting | Notes |
+|-------|------|------------------------|----------------|----------|-------|
+| **Lighter** | Order-book perps (+ spot), Ethereum L2 | Zero for standard accounts. Premium tier pays fees for lower latency. | Short (API candle limits; vendor capture since 2026-04) | Yes | The fee advantage that motivates proxy mode. Standard-account latency must be modeled. |
+| **Hyperliquid** | Order-book perps (+ spot) | Low, but not zero | Official archive: L2 snapshots, asset contexts, fills (coverage to verify) | Yes | Largest perp DEX. Gives native history for basis-model calibration. |
+| **AMMs on Solana** (Raydium, Orca, Meteora) | Spot AMM | Pool fee (≈0.01–1%) + priority fees + MEV | Complete on-chain | Not natively | Where most Speculative tokens trade |
+| **AMMs on EVM** (Uniswap on Ethereum/Base/Arbitrum, Aerodrome) | Spot AMM | Pool fee + gas + MEV | Complete on-chain | Not natively | Majors/Altcoins spot. Base is cheapest for gas. |
+| Others (dYdX, GMX, Drift, Aster, …) | Perps | Varies | Varies | Yes | Later |
+
+**Criteria:** (1) fee level net of latency constraints, (2) native history available or recordable, (3) shorting/leverage, (4) instrument coverage of our asset classes, (5) engineering cost of the execution model, (6) venue risk (smart-contract, sequencer/operator, custody, outages), (7) whether the user can and will actually trade there (account access and jurisdiction are the user's call).
+
+**Recommendation:**
+- **Now:** recorders on **Lighter** and **Hyperliquid**. Both are order-book perps, so one execution-model type covers both. They span Majors and many Altcoins, and both support shorting. Start the Hyperliquid archive backfill.
+- **Recording scope:** all markets: trades, best bid/ask, funding, mark/index, OI. Top-N L2 depth snapshots (e.g. every second) for Majors and a liquid Altcoin subset. Full-depth deltas only for Majors. Storage is cheap compared to the value of the history.
+- **Phase 4:** on-chain AMMs (Solana first for Speculative tokens, then Base), from on-chain history. No recorder needed.
+
+**Needed from the user:** confirm Lighter + Hyperliquid, and confirm you'd be willing and able to trade there.
+
+### 20.2 Decision brief: Q-17 (orchestration & distributed compute)
+
+Two independent decisions:
+
+**(a) Workflow orchestration: what drives long-running research processes.**
+
+The research lifecycle (§8) is a set of multi-step processes that can last hours to weeks: agent tasks, waits for human approval, gate checks, retries after crashes. There are also scheduled jobs: recorder health checks, data refreshes, vault refresh, null-strategy injection, digests. Requirements: durability across restarts, human-in-the-loop waits, timers and scheduling, retries, an audit trail, visibility into what's running, and versioned workflow definitions.
+
+| Option | Strengths | Weaknesses |
+|--------|-----------|------------|
+| **Temporal** | Durable execution designed for long-running workflows with waits and signals (fits agent workflows and approvals). Strong Python SDK. | Extra server + database to operate. Learning curve. Workflow code has determinism rules. |
+| **Prefect** | Python-native, easy to start, good UI, scheduling | Built for data pipelines. Long human waits and complex state machines are less natural. |
+| **Dagster** | Asset-oriented: excellent for data pipelines (ingestion → normalized → derived), with lineage | Not designed for agent/approval workflows |
+| **Airflow** | Mature batch DAG scheduler | Poor fit for dynamic, long-waiting, event-driven work |
+| **Custom: Postgres state machine + task queue** | Lifecycle state already lives in Postgres with gates we define. Minimal dependencies. Full control. Fine at MVP scale. | We build retries, timers, and visibility ourselves. Can become a maintenance burden as complexity grows. |
+
+**Recommendation:** start custom. The lifecycle is already a strict state machine (§8) persisted in Postgres, and a Postgres-backed task queue covers retries and scheduling at MVP scale. Keep workflow logic behind a small `Orchestrator` interface, so moving to **Temporal** at Phase 6 is contained if workflows outgrow it. Data pipelines use the same queue with scheduled jobs. Dagster is an option later if the data estate grows complex.
+
+**(b) Distributed compute: how many backtests run in parallel.**
+
+Parameter sweeps, CV folds, CSCV, robustness variants, and null injection multiply compute (§10.6). Requirements: parallel fan-out, data locality (load once, evaluate many), shared memory so large datasets aren't copied per task, determinism, fault tolerance, cost control, and a path from one machine to many.
+
+| Option | Strengths | Weaknesses |
+|--------|-----------|------------|
+| **Local process pool** (multiprocessing / concurrent.futures) | Zero dependencies. Fast to build. Shared memory via Arrow memory-mapping. | One machine only |
+| **Ray** | Task + actor model, shared object store (zero-copy Arrow across tasks), scales from laptop to cluster, cloud autoscaling | Operational complexity. Another runtime to debug. |
+| **Dask** | Strong for out-of-core dataframes/arrays | Polars/DuckDB already cover out-of-core. Less natural for many independent backtest tasks. |
+| **Serverless/batch cloud** (AWS/GCP Batch, Modal, etc.) | Pay-per-use burst capacity for large sweeps. Nothing idle. | Data transfer cost/latency. Vendor coupling. |
+
+**Recommendation:** define an internal `Executor` interface now and implement it with a **local process pool** for the MVP. Add a **Ray** (or cloud-batch) implementation when one machine stops being enough. The right timing and option depend on where compute runs.
+
+**Needed from the user:** where you expect compute to run (your own machine, a dedicated workstation/server, or cloud), and a rough monthly compute budget. This mostly matters from Phase 6. Nothing blocks earlier phases.
 
 ---
 
@@ -1151,6 +1229,7 @@ The core stack is confirmed (D-023). Workflow orchestration and distributed comp
 | 0.1.0 | 2026-10-05 | Claude (with @brandongla) | Initial draft: goals, principles, architecture, agent hierarchy, lifecycle, false-positive framework, DEX data/simulation requirements, research agenda, efficiency, extensibility, roadmap, decisions, open questions. |
 | 0.2.0 | 2026-10-05 | Claude (with @brandongla) | Added §6 Model Selection & Provider Abstraction (gateway, registry, role profiles, QAM-Bench, model onboarding). Added §7 Human Research Requests & Reporting. Added §10 Core Research Library & Engine Integrity (declarative strategies, sandbox, causality tests, LCR process, certification), replacing the old engine section. Expanded §11 Data Platform (data kinds, raw/normalized/derived layers, connectors, format adapters, bar timestamp convention, granularity-aware fills, instrument master). Added §13 Pilot Universe (BTC/ETH/SOL + rule-based small caps; chains), timescale policy, and infra classes. Added Platform Engineering and Reporter roles, P11–P13, G6–G7, R6. Decisions D-007–D-018. Resolved Q-1, Q-2, Q-3, Q-5. New Q-11–Q-16. Sections renumbered. |
 | 0.3.0 | 2026-10-05 | Claude (with @brandongla) | Added §12.1 evaluation modes (native CEX/DEX, proxy) with proxy-mode controls (basis model, proxy-error budget, fidelity test, lead-lag guard). Added §11.8 source acquisition strategy (forward recorders, on-chain AMM history, Hyperliquid archive). Replaced Tier A/B with three asset classes (Majors, Altcoins, Speculative tokens) and speculative-class survivorship rules (§13.1). Added §6.1a provider landscape snapshot, four-adapter strategy, and data-policy routing. Added §10.6 performance architecture. Confirmed tech stack (§17). Added order-book DEX execution requirements (§12.2). Updated roadmap, robustness suite (proxy fidelity, graveyard check), and pre-registration fields (asset_class, evaluation_mode). Decisions D-019–D-023. Resolved Q-7, Q-11, Q-14; Q-12 partially. New Q-17. |
+| 0.4.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-12 (D-024): MVP providers are Anthropic native + OpenRouter, with OpenRouter pinning/data-policy/conformance requirements (§6.1a). Added decision briefs for Q-16 (execution venues and recorders, §20.1) and Q-17 (orchestration and distributed compute, §20.2) with recommendations. Updated tech stack and roadmap Phase 3. |
 
 ---
 
