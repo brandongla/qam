@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft (living document) |
-| **Version** | 0.5.0 |
+| **Version** | 0.6.0 |
 | **Last updated** | 2026-10-05 |
 | **Owner** | @brandongla |
 | **Initial scope** | Cryptocurrencies, focused on decentralized exchanges (DEXs) |
@@ -1102,7 +1102,21 @@ The MVP runs on a single **Oracle Cloud VM** provided by the user (D-027). Deplo
 - **Secrets:** API keys live in an environment file or secret store on the VM, never in the repo.
 - **Access model:** deployment is done by a scripted installer run from the repository. Where Claude needs access, use a dedicated low-privilege deploy user with its own key. Never share personal credentials in chat.
 - **Development/testing:** this development sandbox can't reach the venue APIs. Recorders are tested here against captured message fixtures, then smoke-tested live on the VM.
-- **Free-tier caveats (to verify):** free cloud VMs may be reclaimed by the provider when idle, and have limited disk and network. Recorder footprint and CPU utilization are monitored, and the recording scope is sized to the VM (Q-18).
+- **VM spec (D-028):** ARM64 (Ampere), 4 CPU, 24 GB RAM. The user's long-running experience says idle reclamation doesn't apply to this account. Resource usage is still monitored.
+- **Multi-architecture support (D-028):** everything builds and runs on **linux/arm64 and linux/amd64**. Only dependencies with wheels for both architectures are allowed (or ones that build from source cleanly). CI tests on both architectures (native ARM runners where available, otherwise emulation). Container images, if used, are multi-arch. Future Rust extensions are built for both targets.
+- **Recording scope vs. resources:** rough estimate for the D-025 scope is on the order of **10–30 GB/month compressed** (dominated by L2 snapshots and full-depth deltas). It's measured after deployment, and the scope is tuned to fit disk and backup capacity.
+
+**Backup options (Q-19).** The goal is at least one copy of every closed recording file off the VM's disk, verified by checksum. A tool such as `rclone` makes the target a config choice, so it can change later without code changes.
+
+| Option | Cost (verify) | Pros | Cons |
+|--------|---------------|------|------|
+| Oracle Object Storage (same account) | Small free allowance, then low per-GB | Same provider, simple auth, fast transfer from the VM | Same account and provider as the VM: not independent of account-level problems |
+| Oracle block-volume backups/snapshots | Limited free allowance | Whole-disk recovery | Coarse. Same provider. Not a substitute for file-level copies. |
+| Backblaze B2 | Small free tier, then very low per-TB | Independent provider, cheap at scale | Another account to manage |
+| Cloudflare R2 | Free tier, no egress fees | Independent provider, free reads for later analysis elsewhere | Another account to manage |
+| User's own machine/NAS (pull via rsync) | Free | Full control, offline copy | Depends on that machine being on. Manual. |
+
+**Recommendation:** nightly `rclone` sync of closed, compressed files to **one independent object store** (B2 or R2), with checksums and a monthly restore test. Optionally add Oracle Object Storage as a second, fast copy. At the estimated volumes, cost stays in the single-digit dollars per month even after a year of accumulation.
 
 ---
 
@@ -1152,6 +1166,7 @@ The MVP runs on a single **Oracle Cloud VM** provided by the user (D-027). Deplo
 | D-025 | 2026-10-05 | First execution venues: **Lighter** and **Hyperliquid** (order-book perps). Recorders start in Phase 1: trades, BBO, funding, mark/index, OI for all markets; top-N L2 snapshots for Majors and a liquid Altcoin subset; full-depth deltas for Majors. Hyperliquid archive backfill. On-chain AMMs (Solana, then Base) in Phase 4. All venue types remain in long-term scope. *(Resolves Q-16.)* | User has trading experience on both. Order-book history can't be backfilled, AMM history can. (§20.1) | Accepted |
 | D-026 | 2026-10-05 | Orchestration: custom Postgres-backed state machine + task queue behind an `Orchestrator` interface (Temporal is the upgrade path). Compute: `Executor` interface with **configurable backends**. MVP backend is a local process pool. *(Resolves Q-17.)* | Simplest thing that works at MVP scale, with contained migration paths (§20.2) | Accepted |
 | D-027 | 2026-10-05 | MVP deployment target: a single user-provided Oracle Cloud VM. Broader deployment options after the MVP. | User direction (§17.1) | Accepted |
+| D-028 | 2026-10-05 | MVP VM is ARM64, 4 CPU / 24 GB RAM. All code, dependencies, CI, and any containers support **both linux/arm64 and linux/amd64**. Idle reclamation isn't treated as a risk for this account. *(Resolves Q-18; backup target split out as Q-19.)* | User direction; avoids architecture lock-in (§17.1) | Accepted |
 
 ---
 
@@ -1166,9 +1181,9 @@ The MVP runs on a single **Oracle Cloud VM** provided by the user (D-027). Deplo
 | Q-10 | Risk-management layer for paper trading (limits, kill switches) | Required before any live consideration | Phase 6 |
 | Q-13 | Class universe rule parameters (Altcoin thresholds, Speculative population definition and launchpads/chains covered, N, rebalance frequency) | Defaults in §13.1 | Phase 4 |
 | Q-15 | Build the gateway's provider adapters ourselves, or wrap an existing multi-provider library (e.g. LiteLLM) behind our interface? | Build = control and full native features. Wrap = speed, but dependency risk. Possible hybrid: own native adapters, library for the long tail. | Phase 3 |
-| Q-18 | MVP VM specifics: shape (CPU arch, cores, RAM), disk size, OS, and backup target for recordings | Needed to size recording scope and retention, and to build for the right CPU architecture (e.g. ARM64). | Before recorder deployment |
+| Q-19 | Backup target for raw recordings | Options and recommendation in §17.1. Decide at recorder deployment. | Before recorders go live |
 
-*Resolved:* Q-1 → D-014, Q-2 → D-012, Q-3 → D-015, Q-5 → D-016, Q-7 → D-023, Q-11 → D-019, Q-12 → D-022 + D-024, Q-14 → D-021, Q-16 → D-025, Q-17 → D-026.
+*Resolved:* Q-1 → D-014, Q-2 → D-012, Q-3 → D-015, Q-5 → D-016, Q-7 → D-023, Q-11 → D-019, Q-12 → D-022 + D-024, Q-14 → D-021, Q-16 → D-025, Q-17 → D-026, Q-18 → D-028.
 
 ### 20.1 Decision brief: Q-16 (first execution venues): decided in D-025
 
@@ -1246,6 +1261,7 @@ Parameter sweeps, CV folds, CSCV, robustness variants, and null injection multip
 | 0.3.0 | 2026-10-05 | Claude (with @brandongla) | Added §12.1 evaluation modes (native CEX/DEX, proxy) with proxy-mode controls (basis model, proxy-error budget, fidelity test, lead-lag guard). Added §11.8 source acquisition strategy (forward recorders, on-chain AMM history, Hyperliquid archive). Replaced Tier A/B with three asset classes (Majors, Altcoins, Speculative tokens) and speculative-class survivorship rules (§13.1). Added §6.1a provider landscape snapshot, four-adapter strategy, and data-policy routing. Added §10.6 performance architecture. Confirmed tech stack (§17). Added order-book DEX execution requirements (§12.2). Updated roadmap, robustness suite (proxy fidelity, graveyard check), and pre-registration fields (asset_class, evaluation_mode). Decisions D-019–D-023. Resolved Q-7, Q-11, Q-14; Q-12 partially. New Q-17. |
 | 0.4.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-12 (D-024): MVP providers are Anthropic native + OpenRouter, with OpenRouter pinning/data-policy/conformance requirements (§6.1a). Added decision briefs for Q-16 (execution venues and recorders, §20.1) and Q-17 (orchestration and distributed compute, §20.2) with recommendations. Updated tech stack and roadmap Phase 3. |
 | 0.5.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-16 (D-025: Lighter + Hyperliquid first, recorders in Phase 1) and Q-17 (D-026: custom Postgres orchestrator, configurable executor backends with a local pool for the MVP). Added §17.1 MVP deployment on a user-provided Oracle Cloud VM (D-027). New Q-18 (VM specifics and backup target). |
+| 0.6.0 | 2026-10-05 | Claude (with @brandongla) | Resolved Q-18 (D-028): ARM64 4-CPU/24 GB VM, dual-architecture (arm64 + amd64) build requirement. Added recording-volume estimate and backup options with a recommendation (§17.1). New Q-19 (backup target). |
 
 ---
 
