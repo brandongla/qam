@@ -10,6 +10,6 @@ DEXs. The full specification is in `docs/DESIGN.md`.
 - Any change to scope, architecture, agent roles, lifecycle gates, statistical thresholds, data sources, or tech stack **must update `docs/DESIGN.md` in the same commit**.
 - For every revision:
   - Bump the version in the header table (semver: major = restructure, minor = new/changed spec, patch = clarifications) and update "Last updated".
-  - Add a row to the **Changelog** (§19).
-  - Record decisions in the **Decision Log** (§17) with the next `D-NNN` ID. When an open question (§18) is resolved, move it into the Decision Log and reference its `Q-NN` ID.
+  - Add a row to the **Changelog** section.
+  - Record decisions in the **Decision Log** section with the next `D-NNN` ID. When an item in **Open Questions** is resolved, move it into the Decision Log and reference its `Q-NN` ID.
 - Don't silently change `[DEFAULT]` thresholds. Each change needs a Decision Log entry with its rationale.

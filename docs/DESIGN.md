@@ -3,17 +3,18 @@
 | | |
 |---|---|
 | **Status** | Draft (living document) |
-| **Version** | 0.1.0 |
+| **Version** | 0.2.0 |
 | **Last updated** | 2026-10-05 |
 | **Owner** | @brandongla |
-| **Initial scope** | Cryptocurrencies on decentralized exchanges (DEXs) |
+| **Initial scope** | Cryptocurrencies, focused on decentralized exchanges (DEXs) |
 | **Future scope** | Equities, ETFs, options, futures, other asset classes |
 
 > **How to use this document.** This is the single source of truth for QAM's specifications.
-> Any change to scope, architecture, gates, thresholds, or agent roles must be reflected here in
-> the same change set, with an entry in the [Decision Log](#17-decision-log) (for decisions) and the
-> [Changelog](#19-changelog) (for every revision). Sections marked **[OPEN]** are not yet decided;
-> sections marked **[DEFAULT]** contain starting values we expect to tune.
+> Any change to scope, architecture, gates, thresholds, models, data sources, or agent roles must
+> be reflected here in the same change set, with an entry in the [Decision Log](#19-decision-log)
+> (for decisions) and the [Changelog](#21-changelog) (for every revision). Sections marked
+> **[OPEN]** are not yet decided; sections marked **[DEFAULT]** contain starting values we expect
+> to tune.
 
 ---
 
@@ -24,53 +25,60 @@
 3. [Guiding Principles](#3-guiding-principles)
 4. [System Overview](#4-system-overview)
 5. [Agent Hierarchy](#5-agent-hierarchy)
-6. [Research Lifecycle (State Machine)](#6-research-lifecycle-state-machine)
-7. [False-Positive Control Framework](#7-false-positive-control-framework)
-8. [Data Platform](#8-data-platform)
-9. [Simulation & Backtesting Engine](#9-simulation--backtesting-engine)
-10. [DEX-Specific Realism Requirements](#10-dex-specific-realism-requirements)
-11. [Initial Research Agenda (Crypto / DEX)](#11-initial-research-agenda-crypto--dex)
-12. [Efficiency & Budgeting](#12-efficiency--budgeting)
-13. [Provenance, Reproducibility & Memory](#13-provenance-reproducibility--memory)
-14. [Extensibility to Other Asset Classes](#14-extensibility-to-other-asset-classes)
-15. [Proposed Technology Stack](#15-proposed-technology-stack)
-16. [Roadmap](#16-roadmap)
-17. [Decision Log](#17-decision-log)
-18. [Open Questions](#18-open-questions)
-19. [Changelog](#19-changelog)
-20. [Glossary](#20-glossary)
+6. [Model Selection & Provider Abstraction](#6-model-selection--provider-abstraction)
+7. [Human Research Requests & Reporting](#7-human-research-requests--reporting)
+8. [Research Lifecycle (State Machine)](#8-research-lifecycle-state-machine)
+9. [False-Positive Control Framework](#9-false-positive-control-framework)
+10. [Core Research Library & Engine Integrity](#10-core-research-library--engine-integrity)
+11. [Data Platform](#11-data-platform)
+12. [Execution Realism (DEX-first)](#12-execution-realism-dex-first)
+13. [Pilot Universe & Research Agenda](#13-pilot-universe--research-agenda)
+14. [Efficiency & Budgeting](#14-efficiency--budgeting)
+15. [Provenance, Reproducibility & Memory](#15-provenance-reproducibility--memory)
+16. [Extensibility to Other Asset Classes](#16-extensibility-to-other-asset-classes)
+17. [Proposed Technology Stack](#17-proposed-technology-stack)
+18. [Roadmap](#18-roadmap)
+19. [Decision Log](#19-decision-log)
+20. [Open Questions](#20-open-questions)
+21. [Changelog](#21-changelog)
+22. [Glossary](#22-glossary)
 
 ---
 
 ## 1. Purpose & Goals
 
 QAM is a system in which **hierarchical teams of AI agents** generate, implement, test, and
-critique quantitative trading hypotheses. Deterministic infrastructure does all the computation,
-and statistical controls sit in the path of every result.
+critique quantitative trading hypotheses. A single, rigorously tested core library does all the
+computation, and statistical controls sit in the path of every result.
 
 ### Primary goals
 
 | # | Goal | How we measure it |
 |---|------|-------------------|
-| G1 | **Minimize false positives.** Strategies that reach "Validated" should have real, persistent edge net of all costs. | Empirical pipeline false-discovery rate (FDR) from null-strategy injection (§7.6); decay from holdout to paper trading. |
-| G2 | **Keep statistical power.** Don't reject real edges so aggressively that nothing gets through. | True-positive rate on synthetic planted-edge strategies (§7.6). |
+| G1 | **Minimize false positives.** Strategies that reach "Validated" should have real, persistent edge net of all costs. | Empirical pipeline false-discovery rate (FDR) from null-strategy injection (§9.6); decay from holdout to paper trading. |
+| G2 | **Keep statistical power.** Don't reject real edges so aggressively that nothing gets through. | True-positive rate on synthetic planted-edge strategies (§9.6). |
 | G3 | **Efficiency.** Get the most validated insight per dollar of compute and LLM spend. | Cost per hypothesis evaluated; cost per validated strategy; time from idea to decision. |
-| G4 | **Reproducibility.** Any reported number can be regenerated exactly. | 100% of results linked to an immutable experiment record (§13). |
-| G5 | **Extensibility.** New asset classes plug in through adapters without redesigning the core. | New asset-class adapter needs no changes to agent, lifecycle, or statistics code (§14). |
+| G4 | **Reproducibility.** Any reported number can be regenerated exactly. | 100% of results linked to an immutable experiment record (§15). |
+| G5 | **Extensibility.** New asset classes, data sources, and LLM models plug in without redesigning the core. | New adapter, connector, or model needs no changes to the lifecycle or statistics code (§6, §11, §16). |
+| G6 | **Engine correctness.** The shared engine has no bugs that inflate results. | Certification suite passes (§10.5). Seeded-defect detection rate is 100% on the canary suite. |
+| G7 | **Human usability.** People can submit ideas and get clear, honest answers. | Request turnaround time. Every request closes with a structured report (§7). |
 
 ### Success criteria for v1
-- An end-to-end pipeline that takes a DEX hypothesis from idea to a paper-trading decision with full provenance.
-- A measured pipeline FDR at or below the target (§7.1) on injected null strategies.
-- At least one strategy family evaluated through the full lifecycle. A well-documented rejection counts as success.
+- An end-to-end pipeline that takes a crypto hypothesis from idea to a paper-trading decision with full provenance.
+- A certified core engine and operator library (§10).
+- A measured pipeline FDR at or below the target (§9.1) on injected null strategies.
+- At least one human-submitted research request answered with a full investigation report.
+- At least two LLM providers, or two models, running behind the Model Gateway and selected by policy (§6).
 
 ---
 
 ## 2. Non-Goals (v1)
 
 - **Live trading with real capital.** v1 ends at paper/forward trading. Live deployment needs a separate design and explicit human approval.
-- **Latency-competitive MEV searching** (sandwiching, sub-block atomic arbitrage). It needs a different infrastructure class (private orderflow, builder relationships, co-location). We **model** MEV as a cost and a risk, but we don't compete in it. See [Q-4](#18-open-questions).
+- **Latency-competitive MEV searching** (sandwiching, sub-block atomic arbitrage). We **model** MEV as a cost and a risk, but we don't compete in it. Research at any timescale is allowed (D-015). Strategies that need specialized infrastructure are flagged, not built for. See [Q-4](#20-open-questions).
 - **Fully autonomous promotion.** A human approves every promotion past the holdout gate.
-- **LLMs as calculators.** Agents never produce performance numbers by reasoning. All numbers come from deterministic tool runs (§3, P3).
+- **LLMs as calculators.** Agents never produce performance numbers by reasoning. All numbers come from certified tool runs (P3).
+- **Paid data-vendor integrations.** These come in a later phase. v1 uses free public endpoints and user-supplied files (D-012). Vendor *file formats* can still be supported through format adapters (§11.4).
 
 ---
 
@@ -79,83 +87,95 @@ and statistical controls sit in the path of every result.
 | ID | Principle | Implication |
 |----|-----------|-------------|
 | P1 | **Every result is guilty until proven innocent.** | The default outcome of the lifecycle is rejection. Gates check for evidence of edge, not for absence of flaws. |
-| P2 | **Count every trial.** | Every backtest, parameter variant, and feature tweak by any agent goes into the global Trial Registry. Multiple-testing corrections use the true count. |
-| P3 | **Agents reason; tools compute.** | LLM agents design, code, critique, and interpret. A deterministic, versioned engine produces every metric. Any number an agent cites must reference an experiment ID. |
+| P2 | **Count every trial.** | Every backtest, parameter variant, and feature tweak by any agent or human goes into the global Trial Registry. Multiple-testing corrections use the true count. |
+| P3 | **Agents reason; tools compute.** | LLM agents design, compose, critique, and interpret. The certified engine produces every metric. Any number cited must reference an experiment ID. |
 | P4 | **Separate generation from evaluation.** | Agents who propose or tune a strategy can't validate it. Validators can't modify it. |
 | P5 | **Information barriers protect out-of-sample data.** | Holdout data sits in a vault behind a non-LLM gatekeeper. Access is one-shot, logged, and budgeted. |
-| P6 | **Pre-register before you look.** | A hypothesis's economic rationale, signal definition, universe, and kill criteria are frozen before exploratory testing. Changes create a new version and count as new trials. |
+| P6 | **Pre-register before you look.** | A hypothesis's rationale, signal definition, universe, search space, and kill criteria are frozen before exploratory testing. |
 | P7 | **Economics before statistics.** | A hypothesis needs a plausible mechanism (who loses money to us, and why do they keep doing it?) before testing. |
 | P8 | **Realism over convenience.** | Simulate costs, slippage, gas, MEV, liquidity, and data availability at least as pessimistically as reality. |
 | P9 | **Kill early, kill cheaply.** | Cheap screens come first and expensive validation last. Budgets are allocated adaptively. |
-| P10 | **Asset-class agnostic core, asset-specific adapters.** | DEX specifics live behind interfaces (§14). |
+| P10 | **Asset-class agnostic core, asset-specific adapters.** | Asset-class specifics live behind interfaces (§16). |
+| P11 | **One canonical implementation of every standard operation.** | Returns, resampling, indicators, CV splits, fills, accounting, and metrics are implemented once, in the certified core library, and reused by everyone. Agents never re-implement the engine. New needs become reviewed library additions (§10). |
+| P12 | **Causal by construction.** | Strategy code can only see data that was knowable at the simulation time. Lookahead is made structurally hard, then checked dynamically anyway (§10.3). |
+| P13 | **Model-agnostic agents.** | No agent role is hard-wired to a provider or model. Models are selected by policy from a registry and benchmarked on our own tasks (§6). |
 
 ---
 
 ## 4. System Overview
 
-The system has four layers. Only the **Agent Layer** is LLM-driven. Everything below it is deterministic, versioned code.
+The system has five layers. Only the **Agent Layer** is LLM-driven, and it reaches models only through the **Model Gateway**. Everything else is deterministic, versioned code.
 
 ```mermaid
 flowchart TB
-    H[Human Principal<br/>mandate, budgets, promotion approval]
+    H[Human Principal & Requesters<br/>mandate, budgets, research requests, approvals]
 
     subgraph AL[Agent Layer - LLM]
         RD[Research Director]
-        DL[Desk Leads]
-        W[Desk Workers]
+        DL[Research Desks]
         VO[Validation Office<br/>independent]
+        PE[Platform Engineering]
+        SS[Shared: Data Steward, Librarian, Reporter]
     end
 
+    MG[Model Gateway + Model Registry<br/>provider adapters, routing, budgets, logging]
+
     subgraph GL[Governance Layer - deterministic]
+        RQ[Request Intake & Tracker]
         TR[Trial Registry]
         EL[Experiment Ledger]
         HV[Holdout Vault + Gatekeeper]
         SG[Stat Gate Service]
     end
 
-    subgraph CL[Compute Layer - deterministic]
+    subgraph CL[Compute Layer - certified core library]
+        OPS[Operator Library<br/>experimental / certified / core]
         BE[Backtest Engine<br/>screening + high-fidelity]
-        FS[Feature Store]
-        SIM[Execution / Cost Simulators]
+        SIM[Execution & Cost Simulators]
+        INT[Integrity Checks<br/>causality, lint, invariants]
         PT[Paper Trading Harness]
     end
 
     subgraph DLY[Data Layer]
-        ING[Ingestion: chains, DEX events, indexers, reference prices]
-        PIT[Point-in-time Store]
+        CON[Connectors: API scripts, bulk files,<br/>on-chain RPC, user files, vendors later]
+        RAW[Raw Archive - immutable]
+        NORM[Normalized PIT Store<br/>ticks, bars, AMM events, funding...]
         QA[Data QA + Quarantine]
     end
 
+    H <--> RQ <--> RD
     H <--> RD
-    RD --> DL --> W
-    RD --> VO
-    W -->|tool calls| BE
-    VO -->|tool calls| SG
-    VO -->|one-shot request| HV
-    BE --> TR
-    BE --> EL
-    SG --> EL
-    BE --> FS --> PIT
+    AL <--> MG
+    RD --> DL & VO & PE & SS
+    DL -->|compose strategies| OPS
+    DL -->|run| BE
+    VO --> SG
+    VO -->|one-shot| HV
+    PE -->|reviewed changes| OPS
+    BE --> INT
+    BE --> TR & EL
     BE --> SIM
-    HV --> PIT
-    ING --> QA --> PIT
-    PT --> PIT
+    BE --> NORM
+    HV --> NORM
+    CON --> RAW --> QA --> NORM
+    PT --> NORM
 ```
 
 ### Component summary
 
 | Layer | Component | Responsibility |
 |-------|-----------|----------------|
-| Agent | Research Director, Desk Leads, Workers, Validation Office | Hypothesis generation, implementation, critique, prioritization (§5) |
+| Agent | Director, Desks, Validation Office, Platform Engineering, shared agents | Hypothesis generation, implementation, critique, prioritization, library maintenance, reporting (§5) |
+| Agent infra | **Model Gateway + Model Registry** | Provider-neutral model access, per-role model selection, fallbacks, budgets, call logging (§6) |
+| Governance | **Request Intake & Tracker** | Structured human research requests, status tracking, report delivery (§7) |
 | Governance | **Trial Registry** | Append-only count of every trial, by hypothesis family and globally |
-| Governance | **Experiment Ledger** | Immutable record of every run: code hash, data snapshot, params, seed, metrics |
+| Governance | **Experiment Ledger** | Immutable record of every run: code/spec hash, data snapshot, params, seed, engine version, metrics |
 | Governance | **Holdout Vault + Gatekeeper** | Isolates reserved data. Runs frozen strategies once and returns gated results |
-| Governance | **Stat Gate Service** | Computes DSR, PBO, FDR-adjusted p-values, and robustness checks. Returns pass/fail per gate |
-| Compute | **Backtest Engine** | Two tiers: fast vectorized screening and high-fidelity event-driven simulation (§9) |
-| Compute | **Feature Store** | Cached, versioned, point-in-time features shared across desks |
-| Compute | **Execution / Cost Simulators** | AMM math, gas, MEV haircut, latency, liquidity constraints (§10) |
+| Governance | **Stat Gate Service** | DSR, PBO, FDR-adjusted p-values, robustness checks. Pass/fail per gate |
+| Compute | **Core Research Library** | Single certified implementation of operators, engine, fills, accounting, CV, metrics, statistics (§10) |
+| Compute | **Integrity Checks** | Static lint, causality (truncation/perturbation) tests, accounting invariants (§10.3) |
 | Compute | **Paper Trading Harness** | Forward testing on live data with simulated fills |
-| Data | Ingestion, PIT store, QA | Canonical, bitemporal, quality-checked market and on-chain data (§8) |
+| Data | Connectors, raw archive, normalized PIT store, QA | Multi-source, multi-granularity, point-in-time data (§11) |
 
 ---
 
@@ -169,77 +189,272 @@ flowchart TB
     RD[Research Director]
     H --- RD
 
-    subgraph Desks[Research Desks - one per strategy family]
-        DL1[Desk Lead: e.g. Cross-sectional]
-        DL2[Desk Lead: e.g. AMM LP]
-        DLn[Desk Lead: ...]
+    subgraph Desks[Research Desks - one per strategy family, opened on demand]
+        DL1[Desk Lead]
         DL1 --> S1[Scout] & HW1[Hypothesis Writer] & Q1[Quant Developer] & A1[Analyst]
     end
 
-    subgraph VOff[Validation Office - reports to Director, independent of desks]
+    subgraph VOff[Validation Office - independent of desks]
         CV[Chief Validator]
-        CV --> SA[Statistical Auditor]
-        CV --> RT[Red Team]
-        CV --> CR[Cost & Execution Reviewer]
-        CV --> CA[Code Auditor]
+        CV --> SA[Statistical Auditor] & RT[Red Team] & CR[Cost & Execution Reviewer] & CA[Code Auditor]
+    end
+
+    subgraph Plat[Platform Engineering]
+        PL[Platform Lead]
+        PL --> LE[Library Engineer] & DE[Data Engineer]
     end
 
     subgraph Shared[Shared Services Agents]
         DS[Data Steward]
         LIB[Librarian]
+        REP[Reporter]
     end
 
-    RD --> DL1 & DL2 & DLn
+    RD --> DL1
     RD --> CV
-    RD --> LIB
-    RD --> DS
+    RD --> PL
+    RD --> DS & LIB & REP
 ```
 
 ### 5.2 Roles
 
 | Tier | Role | Responsibilities | Can | Cannot |
 |------|------|------------------|-----|--------|
-| 0 | **Human Principal** | Sets the mandate, risk limits, and budgets. Approves promotions past holdout. Resolves escalations. | Everything | — |
-| 1 | **Research Director** | Owns the research portfolio. Opens and closes desks, allocates compute/LLM budgets across hypotheses (§12), arbitrates disputes, writes periodic reports. | Allocate budget, kill hypotheses, request validation | Edit strategy code. See holdout results beyond pass/fail. |
-| 2 | **Desk Lead** | Runs one strategy family. Prioritizes hypotheses, reviews pre-registrations, decides when a candidate is frozen. | Approve pre-registration, freeze a candidate, spend desk budget | Validate its own desk's candidates. Access the holdout. |
-| 3 | **Scout** | Surveys literature, on-chain phenomena, and protocol changes. Proposes raw ideas with a mechanism. | Read the knowledge base and external sources | Run backtests |
-| 3 | **Hypothesis Writer** | Turns ideas into formal pre-registrations (§6.2). | Draft pre-registrations | Run backtests |
-| 3 | **Quant Developer** | Implements signals and strategies against the engine API and writes unit tests. | Write strategy code, run screening and development backtests | Change engine, data, or cost-model code |
-| 3 | **Analyst** | Runs exploratory experiments within the pre-registered search space and interprets results. | Run development-period experiments | Run outside the pre-registered search space without a new registration |
-| 2 | **Chief Validator** | Runs the Validation Office and issues the final verdict package to the Director. | Request holdout evaluation (once per frozen candidate) | Modify candidates |
-| 3 | **Statistical Auditor** | Runs Stat Gate checks, checks the trial count, and looks for p-hacking patterns in the trial history. | Read the full trial history | Modify candidates |
-| 3 | **Red Team** | Tries to break the candidate: leakage, lookahead, survivorship, regime dependence, fragile parameters, alternative explanations (e.g. it's just beta or a liquidity premium). | Design and run adversarial tests on development and validation data | Modify candidates |
-| 3 | **Cost & Execution Reviewer** | Stress-tests costs, slippage, gas, MEV exposure, and capacity. | Run cost-stress scenarios | Modify candidates |
-| 3 | **Code Auditor** | Reviews strategy code for bugs, lookahead, and misuse of the engine API. | Read code, run static and dynamic checks | Modify candidates. It files defects instead. |
-| — | **Data Steward** | Monitors data QA, investigates anomalies, approves new data sources, maintains the data catalog. | Quarantine data, propose schema changes | Run strategy research |
-| — | **Librarian** | Maintains the knowledge base of findings, rejected ideas, and reasons for rejection. Dedupes new ideas against prior work. | Write to the knowledge base | Run strategy research |
+| 0 | **Human Principal** | Sets the mandate, risk limits, and budgets. Approves promotions past holdout, core-library changes, and validation-role model changes. Submits research requests. | Everything | — |
+| 1 | **Research Director** | Owns the research portfolio. Triages human requests (§7), opens and closes desks, allocates budgets (§14), arbitrates disputes, publishes digests. | Allocate budget, kill hypotheses, request validation | Edit strategy or library code. See holdout results beyond pass/fail. |
+| 2 | **Desk Lead** | Runs one strategy family. Prioritizes hypotheses, approves pre-registrations, freezes candidates. | Approve pre-registration, freeze a candidate, spend desk budget | Validate its own desk's candidates. Access the holdout. |
+| 3 | **Scout** | Surveys literature and market phenomena. Proposes ideas with a mechanism. | Read KB and external sources | Run backtests |
+| 3 | **Hypothesis Writer** | Turns ideas, including human requests, into formal pre-registrations (§8.2). | Draft pre-registrations | Run backtests |
+| 3 | **Quant Developer** | Composes strategies from library operators (declarative spec first, restricted plugin if needed). Files Library Change Requests (§10.4). | Write strategy specs/plugins, run screening and development backtests, use experimental operators in screening | Modify the core library. Write custom engines, fill logic, or data loaders. |
+| 3 | **Analyst** | Runs experiments within the registered search space and interprets results. Does exploratory data analysis in the scratch sandbox. | Run development-period experiments, scratch EDA (non-admissible, §10.2) | Run outside the registered search space |
+| 2 | **Chief Validator** | Runs the Validation Office and issues the verdict package. | Request holdout evaluation (once per frozen candidate) | Modify candidates |
+| 3 | **Statistical Auditor** | Runs Stat Gate checks, verifies the trial count, and looks for p-hacking patterns in the trial history. | Read full trial history | Modify candidates |
+| 3 | **Red Team** | Tries to break the candidate: leakage, survivorship, regime dependence, fragile parameters, alternative explanations. | Adversarial tests on dev/validation data | Modify candidates |
+| 3 | **Cost & Execution Reviewer** | Stress-tests costs, slippage, gas, MEV, capacity, and data-fidelity assumptions. | Run cost-stress scenarios | Modify candidates |
+| 3 | **Code Auditor** | Reviews strategy specs/plugins and proposed library changes. | Read code, run static/dynamic checks, block library promotions | Modify candidates. It files defects instead. |
+| 2 | **Platform Lead** | Owns the core library roadmap. Triages Library Change Requests and dedupes them against the operator catalog. | Approve experimental→certified promotion (with Code Auditor sign-off) | Merge `core`-tier changes without human approval |
+| 3 | **Library Engineer** | Implements requested operators, engine features, and fill models, with tests. | Write library code + tests in a branch | Merge without review. Use its own operators in research. |
+| 3 | **Data Engineer** | Builds and maintains data connectors and format adapters (§11). | Write connectors, run ingestion | Run strategy research |
+| — | **Data Steward** | Monitors data QA, investigates anomalies, approves new sources, maintains the data catalog. | Quarantine data, approve sources | Run strategy research |
+| — | **Librarian** | Maintains the knowledge base of findings and rejections. Dedupes new ideas against it. | Write to the KB | Run strategy research |
+| — | **Reporter** | Compiles investigation reports and digests from ledger data (§7.4). | Read ledger, KB; write reports | Introduce numbers not in the ledger (R1 linter enforced) |
 
 ### 5.3 Separation of duties & information barriers
 
 1. **Generator/evaluator split.** Desk agents never validate their own work. The Validation Office reports to the Director, not to desks.
-2. **Holdout barrier.** Only the Gatekeeper service (non-LLM) reads holdout data. It accepts **only frozen candidates** (identified by code hash and config hash) and returns a **coarse verdict**: pass/fail per gate, plus a limited metric summary that goes to the Validation Office and the Human only. Desks receive pass/fail and the failed gate's name, but not the holdout metrics. That way they can't fit to the holdout through repeated feedback.
-3. **Anchoring barrier.** The Red Team gets the pre-registration, the frozen code, and the trial count. It does **not** get the desk's narrative of why the strategy works until after its independent review.
-4. **Write barriers.** Strategy agents can't modify engine, cost-model, or data code. Changes there go through the Data Steward or a human-reviewed change process. They also invalidate affected ledger entries (§13).
-5. **Model diversity.** Where cost allows, validators run on a different model or prompt lineage than the generators, to reduce correlated blind spots.
+2. **Builder/user split.** Library Engineers don't run research. Desk agents don't write library code. Code Auditor independently reviews every library promotion.
+3. **Holdout barrier.** Only the Gatekeeper (non-LLM) reads holdout data. It accepts only frozen candidates (identified by spec/code hash and config hash) and returns a coarse verdict. Desks receive pass/fail and the failed gate's name. Holdout metrics go only to the Validation Office and the Human.
+4. **Anchoring barrier.** The Red Team gets the pre-registration, the frozen strategy, and the trial count, but not the desk's narrative, until after its independent review.
+5. **Write barriers.** Data and library changes go through Platform Engineering / Data Steward, with the review tiers in §10.4. Changes that alter results invalidate affected ledger entries (§15.2).
+6. **Model diversity.** Validation roles are assigned a different model lineage than the generators of the work under review where the registry allows it (§6.4).
 
 ### 5.4 Agent operating rules (enforced in prompts and by tooling)
 
-- **R1 — Cite or don't claim.** Any quantitative claim must reference a ledger experiment ID. Unreferenced numbers are rejected by the report linter.
+- **R1 — Cite or don't claim.** Every quantitative claim references a ledger experiment ID. The report linter rejects unreferenced numbers.
 - **R2 — Stay in the registered search space.** Exploring beyond it requires a registration amendment, which increments the trial family.
-- **R3 — Report failures.** Every run, including failed or abandoned ones, is logged automatically by the engine. Agents can't run untracked backtests.
+- **R3 — No untracked runs.** The engine logs every run automatically, including failed ones. Scratch EDA is logged too.
 - **R4 — State a mechanism.** Every hypothesis names the counterparty or friction that funds the edge.
-- **R5 — Escalate, don't improvise.** If data looks wrong, an agent escalates to the Data Steward instead of patching around it inside strategy code.
+- **R5 — Escalate, don't improvise.** Bad data goes to the Data Steward. A missing operator becomes a Library Change Request. Agents never patch around either inside strategy code.
+- **R6 — Use the library.** Strategies may only use the library's data access, operators, engine, and metrics. Re-implementing them is a policy violation, and the sandbox makes it impractical (§10.2).
 
 ### 5.5 Agent communication
 
-- Agents communicate through **structured artifacts** (pre-registration, experiment request, validation report, verdict), not just free-form chat. Every artifact has a JSON schema and is stored in the ledger or knowledge base.
-- Each agent's context is assembled from: its role prompt, the relevant artifacts, a knowledge-base retrieval (similar past hypotheses and their fates), and its tool permissions.
+- Agents communicate through **structured artifacts** with JSON schemas: pre-registration, experiment request, Library Change Request, validation report, verdict, investigation report. They're stored in the ledger or KB.
+- Each agent's context is assembled from: its role prompt, the relevant artifacts, a KB retrieval (similar past hypotheses and their fates), the operator catalog (for builders), and its tool permissions.
 
 ---
 
-## 6. Research Lifecycle (State Machine)
+## 6. Model Selection & Provider Abstraction
 
-### 6.1 States and gates
+**Goal:** Use the best model for each job, and adopt new model releases cleanly and safely, without code changes or loss of reproducibility.
+
+### 6.1 Architecture
+
+```mermaid
+flowchart LR
+    A[Agent runtime<br/>role, task] --> R[Router<br/>role profile + policy]
+    R --> REG[(Model Registry)]
+    R --> G[Model Gateway]
+    G --> P1[Provider adapter: Anthropic]
+    G --> P2[Provider adapter: OpenAI]
+    G --> P3[Provider adapter: Google]
+    G --> P4[Provider adapter: OpenAI-compatible<br/>local / open-weight / other hosts]
+    G --> LOG[(Call log: model, version,<br/>prompt hash, tokens, cost, latency)]
+    BENCH[QAM-Bench<br/>role-specific evals] --> REG
+```
+
+- **Model Gateway.** A single provider-neutral interface for all LLM calls. It normalizes messages, tool calls, structured (JSON-schema) output, streaming, and errors across providers. Each provider's features (prompt caching, reasoning/effort controls, batch APIs) are exposed as declared **capabilities**, so callers can use them without branching on the provider.
+- **Provider adapters.** One per API family. Adding a provider means adding an adapter and passing the adapter conformance tests. Agent code doesn't change.
+- **Tools are provider-neutral.** Agent tools (engine, data, registry, KB, reports) are exposed via MCP servers. Permissions are enforced in *our* tool layer, not by any provider, so §5 barriers hold whatever model is behind a role.
+- **Agent runtime.** A thin in-house agent loop on top of the gateway: role prompt, context assembly, tool calls, budget checks. It isn't tied to any vendor SDK (D-018).
+
+### 6.2 Model Registry
+
+The registry is version-controlled configuration listing every model we can use:
+
+```yaml
+models:
+  - key: provider-x/model-a-2026-09        # internal key, never a floating alias
+    provider: provider-x
+    api_model: "<exact pinned model version string>"
+    lineage: provider-x                    # used for diversity constraints
+    status: active                          # candidate | shadow | canary | active | deprecated | retired
+    capabilities:
+      tool_use: true
+      structured_output: true
+      context_tokens: 400000
+      reasoning_controls: true
+      prompt_caching: true
+      batch_api: true
+    pricing: {input_per_mtok: ..., output_per_mtok: ..., cached_input_per_mtok: ...}
+    limits: {rpm: ..., tpm: ...}
+    bench: {release: QB-0.3, scores: {strategy_compose: ..., defect_detection: ..., faithfulness: ..., ...}}
+    added: 2026-10-05
+    notes: ""
+```
+
+- **Pinned versions only.** Roles resolve to exact model versions, never floating "latest" aliases, so behavior doesn't change underneath us.
+- Pricing and limits are configuration, refreshed when providers change them. Gateway cost accounting uses the registry.
+
+### 6.3 Role profiles & routing policies
+
+Each role declares requirements and an objective. The router picks the model.
+
+```yaml
+roles:
+  quant_developer:
+    requires: {tool_use: true, structured_output: true, min_context: 128000}
+    min_bench: {strategy_compose: 0.90}
+    objective: min_cost                 # cheapest model meeting requirements
+    fallbacks: 2
+  red_team:
+    requires: {tool_use: true, min_context: 200000}
+    min_bench: {defect_detection: 0.85}
+    objective: max_quality
+    diversity: {differ_from_lineage_of: generator}   # §5.3 item 6
+  scout:
+    objective: min_cost
+    cascade: true                       # try a cheap model first; escalate on failure or low confidence
+```
+
+**Routing rules:**
+1. **Eligibility:** status ∈ {active, canary}, meets capability requirements and minimum bench scores, and respects the diversity constraint.
+2. **Objective:** `min_cost` picks the cheapest eligible model. `max_quality` picks the highest role-relevant bench score. `balanced` maximizes score per dollar.
+3. **Cascade (optional, routine roles only):** start with the cheapest eligible model and escalate to a stronger one on schema failure, tool error, or low self-reported confidence. Never used for Validation Office verdicts.
+4. **Stickiness:** the model is resolved once per work item (e.g. per hypothesis stage) and pinned for its duration. A single review isn't produced by a mix of models.
+5. **Fallback:** on provider outage, rate limit, or repeated errors, move to the next eligible model. The switch is logged.
+6. **Budget guard:** the gateway enforces per-role and per-work-item token/cost caps (§14).
+
+### 6.4 QAM-Bench: choosing models on our own tasks
+
+Public benchmarks don't tell us which model is best at *our* jobs, so we keep a private, versioned evaluation suite with known answers:
+
+| Suite | Role(s) | Task | Score |
+|-------|---------|------|-------|
+| `strategy_compose` | Quant Developer | Implement specified strategies from a written spec using the library API | Hidden tests pass, causality checks pass, no policy violations |
+| `defect_detection` | Code Auditor, Red Team | Review seeded-defect strategies (lookahead, survivorship, cost omission, wrong bar alignment, leakage via labels) mixed with clean ones | Recall on defects; false-alarm rate on clean ones |
+| `prereg_quality` | Hypothesis Writer | Turn raw ideas into pre-registrations | Schema validity, completeness, human-calibrated rubric on mechanism quality |
+| `faithfulness` | Reporter, Analyst, Chief Validator | Summarize ledger results | Fraction of claims traceable to the ledger; hallucinated-number rate (target 0) |
+| `dedupe` | Librarian, Platform Lead | Match new ideas or operator requests against the KB / catalog | Precision/recall |
+| `library_eng` | Library Engineer | Implement operators against a spec with hidden tests | Hidden tests, causality tests, mutation score |
+| `triage` | Research Director | Prioritize a request queue against known-value outcomes | Rank correlation with reference ordering |
+
+Every result records cost and latency. The bench is **kept private and refreshed** periodically to avoid contamination. Bench versions are recorded in the registry.
+
+### 6.5 Onboarding new models (release pipeline)
+
+```mermaid
+stateDiagram-v2
+    [*] --> Candidate: added to registry
+    Candidate --> Shadow: passes adapter conformance + QAM-Bench minimums
+    Shadow --> Canary: shadow comparison acceptable
+    Canary --> Active: canary metrics acceptable (+ human approval for validation roles)
+    Active --> Deprecated: superseded / price change / regression
+    Deprecated --> Retired
+    Canary --> Candidate: regression found
+```
+
+- **Shadow:** the candidate receives copies of real tasks in parallel with the active model. Its outputs aren't used, only compared (schema validity, tool-error rate, Code Auditor agreement, cost).
+- **Canary:** the candidate handles a small share [DEFAULT 10%] of non-validation work items for its role.
+- **Promotion** for Validation Office roles additionally needs human approval and a `defect_detection` score at least as good as the incumbent's.
+- Each transition is logged in the registry history.
+
+### 6.6 Provenance & reproducibility
+
+- Every LLM call is logged: role, work item, model key, exact API version, parameters, prompt/context hash, tool calls, token usage, cost, latency.
+- Ledger artifacts reference the agent calls that produced them.
+- **LLM outputs are not expected to be deterministic.** Reproducibility attaches to *artifacts* (specs, code, configs), which are stored and re-executable. Numbers come only from the deterministic engine (P3), so changing models never changes a reported metric.
+
+### 6.7 Security
+- API keys live in a secrets manager or environment, scoped per provider. Never in the repo or in agent context.
+- Agent tool permissions are enforced server-side, whatever the model claims.
+
+---
+
+## 7. Human Research Requests & Reporting
+
+### 7.1 Intake
+
+Humans submit ideas through a structured **Research Request**. Initially this is a Markdown/YAML file in `requests/` or a GitHub issue template, and later possibly a UI.
+
+```yaml
+request_id: REQ-0007
+title: "Does SOL show weekend mean reversion?"
+submitted_by: brandongla
+question: "Plain-language idea or question"
+motivation: "Why you think this might work / what you observed"
+suggested_assets: [SOL]
+suggested_horizons: ["4h", "1d"]
+suggested_data: ["OHLCV 1h"]
+depth: standard            # quick_look | standard | full_lifecycle
+priority: normal           # low | normal | high
+constraints: "anything that must/must not be done"
+attachments: []            # files, links, prior code
+```
+
+### 7.2 Processing
+
+1. **Triage (Director):** dedupe against the KB. Prior work may already answer the question, in which case the requester gets that report plus what's different now. Ask clarifying questions if the request is ambiguous.
+2. **Translation:** the Hypothesis Writer turns the request into one or more pre-registrations. The **request→hypothesis mapping** goes back to the requester before testing starts, so they can confirm it captures their idea.
+3. **Assignment:** route to an existing desk, or open an ad-hoc desk. Budget comes from the **Human Request lane** [DEFAULT: 30% of research budget reserved].
+4. **Execution:** same lifecycle, same gates, same trial counting as agent-generated ideas. Human ideas don't skip any controls.
+5. **Delivery:** an Investigation Report (§7.4), plus a status update in the tracker.
+
+**Request states:** `Received → Triaged → Awaiting clarification → In progress → Report delivered → Closed` (or `Follow-up requested`).
+
+### 7.3 Depth levels
+
+| Depth | Lifecycle reached | Label on results | Typical use |
+|-------|-------------------|------------------|-------------|
+| `quick_look` | Screening only (G2) | **"Exploratory — not validated"** | Is there anything here at all? |
+| `standard` | Through Validation (G3) | "Passed/failed validation; holdout untouched" | Serious evaluation without spending holdout budget |
+| `full_lifecycle` | Through holdout and paper trading (G4–G6) | Standard verdict | Candidate for real use |
+
+Quick looks still count trials in their family. A later full investigation of the same idea inherits that trial count.
+
+### 7.4 Investigation Report (standard template)
+
+Reports are generated by the Reporter from ledger and KB data. Every number is linked to an experiment ID (R1, enforced by the linter). Output is Markdown plus a rendered HTML version stored in `reports/`.
+
+1. **Verdict box:** `Rejected | Inconclusive | Promising (exploratory) | Passed Validation | Passed Holdout | Validated (forward)`, the stage reached, and a one-paragraph plain-language summary.
+2. **Question as asked, and how we tested it:** the request→hypothesis mapping.
+3. **Data used:** sources, granularity, period, universe, and data-fidelity caveats (e.g. "bar-level fills").
+4. **Method:** strategy definition, search space, costs assumed, CV scheme.
+5. **Results:** net performance, costs breakdown, charts (equity, drawdown, cost sensitivity, parameter-stability heatmap, regime breakdown).
+6. **Robustness & validation:** which gates passed or failed, and why.
+7. **How hard we looked:** number of trials, multiple-testing adjustment applied.
+8. **Caveats & alternative explanations.**
+9. **What would change our mind:** the data or evidence that would reopen the question.
+10. **Recommended next steps.**
+11. **Appendix:** experiment IDs, spec hashes, data snapshot hashes, engine version, models used.
+
+The Director also publishes a periodic **Research Digest**: portfolio status, open requests, verdicts, and system KPIs (§14.4).
+
+---
+
+## 8. Research Lifecycle (State Machine)
+
+### 8.1 States and gates
 
 ```mermaid
 stateDiagram-v2
@@ -251,12 +466,12 @@ stateDiagram-v2
     Screening --> Archived: kill criteria hit
     Exploration --> Frozen: Desk Lead freezes candidate
     Exploration --> Archived: budget exhausted / kill criteria
-    Frozen --> Validation
+    Frozen --> Validation: integrity checks pass + all operators certified
     Validation --> HoldoutTest: G3 statistical + robustness + red team
     Validation --> Archived: fails G3
     Validation --> Exploration: defect found (new version, trials carry over)
     HoldoutTest --> HumanReview: G4 holdout pass
-    HoldoutTest --> Archived: G4 fail (holdout burned for this family)
+    HoldoutTest --> Archived: G4 fail (holdout budget consumed)
     HumanReview --> PaperTrading: G5 approved
     HumanReview --> Archived: rejected
     PaperTrading --> Validated: G6 forward performance consistent
@@ -267,64 +482,60 @@ stateDiagram-v2
 
 | Gate | Name | Owner | Pass criteria (summary) |
 |------|------|-------|-------------------------|
-| G0 | Registration | Desk Lead + Librarian | Plausible mechanism (R4). Not a duplicate of an archived idea, unless new evidence is stated. Complete pre-registration. |
-| G1 | Feasibility | Data Steward | Required data exists, is point-in-time, passes QA, and covers enough history and regimes. |
-| G2 | Screening | Desk Lead | Screening-tier backtest shows a signal in the expected direction, above a weak threshold, net of rough costs. |
-| G3 | Validation | Validation Office | All Stat Gates (§7.3), robustness suite (§7.4), cost stress (§10), and code audit pass. Red Team has no unresolved critical findings. |
-| G4 | Holdout | Gatekeeper (automated) | A one-shot run on the vault meets the pre-declared holdout criteria (§7.5). |
-| G5 | Promotion review | Human | Human reviews the verdict package and approves paper trading. |
-| G6 | Forward test | Stat Gate Service | Paper-trading performance is consistent with the validation estimate, within pre-declared tolerance, after the minimum duration. |
+| G0 | Registration | Desk Lead + Librarian | Plausible mechanism (R4). Not a duplicate. Complete pre-registration. |
+| G1 | Feasibility | Data Steward | Required data kinds exist at the needed granularity, are point-in-time, pass QA, and cover enough history and regimes. |
+| G2 | Screening | Desk Lead | Screening-tier backtest shows a signal in the expected direction, net of rough costs. |
+| — | Freeze check | Automated | Strategy passes integrity checks (§10.3). Every operator used is `certified` or `core`. |
+| G3 | Validation | Validation Office | Stat Gates (§9.3), robustness suite (§9.4), cost stress (§12), and code audit all pass. No unresolved critical Red Team findings. |
+| G4 | Holdout | Gatekeeper (automated) | A one-shot vault run meets the pre-declared holdout criteria (§9.5). |
+| G5 | Promotion review | Human | Approves paper trading after reviewing the verdict package. |
+| G6 | Forward test | Stat Gate Service | Paper performance is consistent with the validation estimate within pre-declared tolerance, after the minimum duration. |
 
-### 6.2 Pre-registration schema (frozen at G0)
+### 8.2 Pre-registration schema (frozen at G0)
 
 ```yaml
 id: HYP-000123
 version: 1
-family: cross_sectional_momentum      # trial family for multiple-testing control
+family: cross_sectional_momentum
+origin: {type: human_request, ref: REQ-0007}     # or {type: agent, ref: scout-07}
 title: "Short-horizon momentum in mid-cap DEX tokens"
 mechanism: >
-  Who pays us and why it persists (e.g., slow information diffusion among retail
-  traders on DEX; limited arbitrage capital in illiquid tokens).
+  Who pays us and why it persists.
 universe:
-  chains: [ethereum, base, arbitrum]
-  venues: [uniswap_v3, aerodrome]
-  filters: {min_pool_tvl_usd: 1_000_000, min_age_days: 90, exclude: [stablecoins, wrapped_majors]}
-signal_definition: "Plain-language and pseudo-code definition of the signal"
-search_space:                          # everything allowed to be tuned
+  rule_ref: UNIV-tierB-v1          # versioned PIT universe rule (§13)
+data_requirements:
+  - {kind: bar, interval: 1h, fields: [o, h, l, c, v]}
+  - {kind: amm_state, needed_for: execution}
+horizon: {signal: "6h-48h", holding: "6h-24h"}
+infra_class: retail_feasible       # §13.3
+signal_definition: "Plain-language + reference to strategy spec draft"
+search_space:
   lookback_hours: [6, 12, 24, 48]
   holding_hours: [6, 12, 24]
-  rebalance: [hourly, 4h]
 expected_effect: {direction: positive, rough_magnitude: "SR 0.5-1.5 net"}
-horizon_and_frequency: "intraday to multi-day"
-cost_assumptions: "engine default DEX cost model v1 + 2x stress"
+execution_venue: dex               # dex | cex (see Q-11)
+cost_assumptions: "engine default cost model for venue + 2x stress"
 kill_criteria:
   - "Screening net SR < 0.3 across all search-space points"
-  - "Effect disappears after excluding top 5 tokens by contribution"
-data_requirements: [swaps, pool_state, token_metadata, gas]
 max_trials_budget: 200
-author_agents: [scout-07, hypwriter-02]
 approved_by: desk-lead-xsec
 ```
 
-The search space defines how many trials are allowed. Expanding it creates a new version and adds to the family's trial count.
-
 ---
 
-## 7. False-Positive Control Framework
+## 9. False-Positive Control Framework
 
-This section is the core of the design. Several mechanisms stack, because no single one is enough.
+This section is the core of the design. Several mechanisms stack, because no single one is enough. Engine-level protections are in §10.
 
-### 7.1 Targets [DEFAULT]
+### 9.1 Targets [DEFAULT]
 
 | Metric | Target |
 |--------|--------|
 | Pipeline FDR among strategies passing G4, measured via null injection | ≤ 5% |
-| Pipeline power on planted edges of SR ≥ 1.0 (net), measured via synthetic positives | ≥ 60% |
-| Holdout-to-paper Sharpe decay (median, across validated strategies) | ≤ 50% |
+| Pipeline power on planted edges of SR ≥ 1.0 (net) | ≥ 60% |
+| Holdout-to-paper Sharpe decay (median) | ≤ 50% |
 
-### 7.2 Data partitioning
-
-Time is partitioned into four zones. The boundaries are configured per asset class and reviewed when the holdout is refreshed.
+### 9.2 Data partitioning
 
 ```
 |<------------- Development ------------->|<-- Validation -->|<-- Vault (Holdout) -->|<-- Forward (Paper) -->
@@ -332,327 +543,512 @@ Time is partitioned into four zones. The boundaries are configured per asset cla
                                              checks only          access only
 ```
 
-- **Development:** Desks explore and tune here, using walk-forward / purged k-fold CV with embargo.
-- **Validation:** The Validation Office uses this zone. Desks see only aggregated results.
-- **Vault:** The most recent period, initially the last **9–12 months** [DEFAULT]. Only the Gatekeeper reads it.
-- **Forward:** Data that didn't exist when the candidate was frozen. This is the cleanest test.
-- **Cross-sectional holdout** [OPEN, Q-6]: Optionally reserve a random subset of tokens or pools, in addition to the time holdout.
+- **Development:** exploration and tuning, using purged k-fold / walk-forward CV with embargo (library-provided splitters only).
+- **Validation:** used by the Validation Office. Desks see only aggregated results.
+- **Vault:** the most recent **9–12 months** [DEFAULT]. Only the Gatekeeper reads it.
+- **Forward:** data that didn't exist when the candidate was frozen.
+- **Cross-sectional holdout** [OPEN, Q-6].
+- Partition boundaries apply to **all** data kinds and sources for an asset. A source with longer history doesn't extend into the vault.
 
-**Holdout budget and refresh.** Each trial family has a holdout budget of [DEFAULT] **3 one-shot evaluations** per vault period. Once a family exhausts its budget, its holdout is "burned": further candidates from that family must wait for a vault refresh, when time rolls forward and the old vault merges into Development. Every Gatekeeper access is logged and goes into the trial count.
+**Holdout budget:** [DEFAULT] **3 one-shot evaluations** per trial family per vault period. When the vault refreshes, time rolls forward and the old vault merges into Development. Every access is logged and counted.
 
-### 7.3 Statistical gates (G3) [DEFAULT thresholds]
+### 9.3 Statistical gates (G3) [DEFAULT thresholds]
 
 | Gate | Method | Default threshold |
 |------|--------|-------------------|
-| SG-1 | **Deflated Sharpe Ratio** (Bailey & López de Prado), using the family's effective trial count from the Trial Registry and correcting for non-normal returns | DSR ≥ 0.95 |
-| SG-2 | **Probability of Backtest Overfitting** via Combinatorially Symmetric Cross-Validation (CSCV) over the explored search space | PBO ≤ 0.20 |
-| SG-3 | **Multiple-testing-adjusted significance** across all active families: Benjamini–Yekutieli FDR (valid under dependence), with a Holm–Bonferroni cross-check | q ≤ 0.05 |
-| SG-4 | **Minimum t-stat hurdle** (Harvey–Liu–Zhu style) on net returns, using HAC / Newey–West standard errors | t ≥ 3.0 |
-| SG-5 | **Minimum track record length** for the observed SR and higher moments | Observed sample ≥ MinTRL |
-| SG-6 | **Effective sample size:** independent bets after accounting for overlap and autocorrelation | ≥ 100 independent bets, across ≥ 2 distinct market regimes |
-| SG-7 | **Benchmark-adjusted alpha:** returns aren't explained by known factors (crypto market beta, size, liquidity, momentum, ETH/BTC beta) | Alpha t ≥ 2.5 after factor regression |
-| SG-8 | **Concentration:** edge isn't driven by a handful of tokens, days, or trades | Passes SG-1 after removing the top 5% of P&L contributors |
+| SG-1 | **Deflated Sharpe Ratio**, using the family's effective trial count, non-normality adjusted | DSR ≥ 0.95 |
+| SG-2 | **Probability of Backtest Overfitting** (CSCV) over the explored search space | PBO ≤ 0.20 |
+| SG-3 | **Benjamini–Yekutieli FDR** across active families (Holm–Bonferroni cross-check) | q ≤ 0.05 |
+| SG-4 | **Minimum t-stat hurdle** on net returns with HAC standard errors | t ≥ 3.0 |
+| SG-5 | **Minimum track record length** | Sample ≥ MinTRL |
+| SG-6 | **Effective sample size** (independent bets) | ≥ 100 across ≥ 2 regimes |
+| SG-7 | **Factor-adjusted alpha** (crypto market beta, size, liquidity, momentum, BTC/ETH beta) | Alpha t ≥ 2.5 |
+| SG-8 | **Concentration**: survives removal of the top 5% of P&L contributors | Passes SG-1 |
 
-**Effective trial count.** The Trial Registry records raw trials. The Stat Gate Service estimates *effective* independent trials by clustering trial return streams by correlation, as in the DSR literature. Raw count is the conservative upper bound. Effective count is used only if the clustering method is itself validated on synthetic data.
+The effective trial count is estimated by clustering trial return streams. The raw count is the conservative bound, and the effective count is used only once the clustering method has been validated on synthetic data.
 
-### 7.4 Robustness suite (G3)
+### 9.4 Robustness suite (G3)
 
 | Test | Requirement |
 |------|-------------|
-| **Parameter stability** | Performance at neighboring points of the search space is ≥ 50% of peak. No isolated spikes. |
-| **Subperiod stability** | Positive net performance in a majority of non-overlapping subperiods (e.g. quarters). No single subperiod contributes more than 40% of P&L. |
-| **Regime analysis** | Performance reported across bull, bear, and chop markets, high/low volatility, and high/low gas. Regime dependence isn't disqualifying, but it must be pre-declared or justified. |
-| **Universe perturbation** | Survives random 80% subsamples of the universe and alternative liquidity filters. |
-| **Cost stress** | Net-positive at 2× modeled costs. Break-even cost multiple reported. |
-| **Delay stress** | Net-positive with signal execution delayed by +1 block / +1 bar (or the asset-class equivalent). |
-| **Placebo tests** | The signal shuffled in time or cross-section shows no edge. A sign-flipped strategy loses money. |
-| **Leakage probes** | Lag every input by an extra period. If performance drops sharply, investigate for lookahead. |
-| **Implementation equivalence** | Screening-tier and high-fidelity-tier results agree within tolerance. Any divergence must be explained. |
+| Parameter stability | Neighboring search-space points ≥ 50% of peak. No isolated spikes. |
+| Subperiod stability | Positive in a majority of subperiods. No single subperiod > 40% of P&L. |
+| Regime analysis | Report by bull/bear/chop, vol regime, and gas regime. Dependence must be pre-declared or justified. |
+| Universe perturbation | Survives random 80% universe subsamples and alternative filters. |
+| Cost stress | Net-positive at 2× modeled costs. Break-even multiple reported. |
+| Delay stress | Net-positive with execution delayed one more bar/block. |
+| Placebo tests | Shuffled signal shows no edge. Sign-flipped strategy loses money. |
+| Data-source robustness | Where multiple sources exist for the same asset/period, results agree within tolerance. |
+| Granularity robustness | If the edge relies on intrabar behavior, it must be confirmed on tick data (§11.5). |
+| Implementation equivalence | Screening and high-fidelity tiers agree within tolerance. |
 
-### 7.5 Holdout criteria (G4)
+### 9.5 Holdout criteria (G4)
 
-These criteria are declared when the candidate is frozen, before vault access. Default: on the vault period, net Sharpe ≥ 50% of the validation estimate, sign consistent, max drawdown within 1.5× of validation, and no gate-level data-quality alerts.
+These are declared at freeze, before vault access. Default: net Sharpe on the vault ≥ 50% of the validation estimate, sign consistent, max drawdown ≤ 1.5× validation, and no data-quality alerts.
 
-### 7.6 Calibrating the pipeline itself
+### 9.6 Calibrating the pipeline itself
 
-The pipeline is a classifier, so we measure its error rates directly.
+- **Null injection:** blinded synthetic null strategies and placebo versions of real hypotheses run through the full lifecycle. Their pass rate estimates per-gate and end-to-end FPR.
+- **Positive injection:** planted-edge data or strategies with known SR measure power.
+- **Threshold tuning:** thresholds are adjusted to meet §9.1, and every change is logged in the Decision Log.
+- **Blinding integrity:** the injection share is known only to the Human and the Gatekeeper.
 
-- **Null injection (false-positive rate).** We periodically inject **synthetic null strategies** through the full lifecycle: random signals, signals built on pure-noise features, and placebo versions of real hypotheses. They arrive as blinded tickets, so agents can't tell them apart from real work. Their pass rate at each gate estimates the per-gate and end-to-end false-positive rate.
-- **Positive injection (power).** We inject **planted-edge** data or strategies with known Sharpe ratios to measure power at each gate.
-- **Threshold tuning.** Gate thresholds in §7.3 are adjusted to meet the §7.1 targets. Every change is logged in the Decision Log.
-- **Blinding integrity.** The share of injected tickets is a secret configuration value, known only to the Human and the Gatekeeper.
-
-### 7.7 Common failure modes we explicitly guard against
+### 9.7 Failure modes and guards
 
 | Failure mode | Guard |
 |--------------|-------|
-| Lookahead bias | Point-in-time data API (§8.3), leakage probes, code audit |
-| Survivorship bias | Universe includes delisted/dead/rugged tokens and drained pools, at the PIT universe as of each date |
-| Selection bias via silent retries | Engine-enforced trial logging (R3), Trial Registry |
-| Overfitting via search-space creep | Pre-registration, versioning, trial carry-over |
-| Holdout leakage through feedback | Coarse gatekeeper responses, holdout budget |
-| Unrealistic fills | AMM-exact simulation, gas, MEV haircut, capacity limits (§10) |
-| Fake volume / wash trading | Data QA filters (§8.4) |
-| Agent hallucinated results | R1 cite-or-don't-claim, report linter |
-| Correlated agent blind spots | Model/prompt diversity in the Validation Office |
+| Lookahead bias | Causal data access, engine-controlled signal→fill alignment, causality tests (§10.3) |
+| Bar timestamp misalignment | Canonical `knowledge_time = interval_end + latency` (§11.3) |
+| Engine/accounting bugs | Certified library, oracle cross-checks, invariants, mutation testing (§10.5) |
+| Agent re-implementing logic with subtle bugs | Sandbox import allowlist, declarative specs, inadmissibility rule (§10.2) |
+| Survivorship bias | PIT universes include dead/delisted/rugged assets (§11.6, §13) |
+| Selection bias via silent retries | Engine-enforced logging (R3), Trial Registry |
+| Search-space creep | Pre-registration, versioning, trial carry-over |
+| Holdout leakage via feedback | Coarse gatekeeper responses, holdout budget |
+| Unrealistic fills | Venue-specific execution simulation, conservative OHLC fill rules (§11.5, §12) |
+| Fake volume / wash trading | Data QA filters (§11.7) |
+| Hallucinated results | R1 linter, `faithfulness` bench gating for reporting roles (§6.4) |
+| Correlated model blind spots | Lineage diversity for validation roles (§6.3) |
 
 ---
 
-## 8. Data Platform
+## 10. Core Research Library & Engine Integrity
 
-### 8.1 Initial sources [OPEN — see Q-1, Q-2]
+**Goal:** One carefully tested, centralized implementation of every standard operation. It should be structurally hard for any agent to introduce lookahead or engine bugs, and easy to extend through a reviewed process.
 
-| Category | Candidate sources | Notes |
-|----------|-------------------|-------|
-| Raw chain data | Own or hosted archive nodes (EVM), RPC providers; Solana RPC / Geyser | Ground truth. Highest cost and effort. |
-| Decoded DEX events | Indexers / data warehouses (e.g. Dune, Allium, Flipside, The Graph subgraphs), or self-decoding from raw logs | Faster start. Must verify against raw chain data. |
-| Venues (initial) | Uniswap v2/v3/v4, Curve, Balancer, Aerodrome/Velodrome; optionally Raydium/Orca/Meteora (Solana); perp DEXs (Hyperliquid, dYdX, GMX) | Depends on the chain decision. |
-| Reference prices | CEX prices (e.g. Binance, Coinbase) for context and labels only | Not tradeable in v1. Used for features and benchmarks. |
-| Gas / fees | Block base fee, priority fees, L2 fee components | Required by the cost model. |
-| Token metadata | Contract properties (fee-on-transfer, rebasing, blacklist/honeypot flags), launch time, supply schedule/unlocks | Required for universe filters. |
-| MEV data | Public mempool archives, builder/relay data, sandwich detection datasets | Used to estimate MEV haircut. |
+### 10.1 Library scope
 
-### 8.2 Canonical schema (asset-class agnostic core)
+| Module | Contents |
+|--------|----------|
+| `data` | PIT data access API (the only way to read data), universe resolution, calendar handling |
+| `ops` | Causal operators: returns, log returns, resampling/bar building, rolling and expanding stats, EWM, z-scores, ranks, cross-sectional ops, volatility estimators, technical indicators, joins/as-of alignment |
+| `labels` | Forward-return labels and triple-barrier labels. These are the **only** sanctioned way to look forward, and they're used only as targets, never as features. |
+| `cv` | Walk-forward, purged k-fold with embargo, CSCV splitters |
+| `engine` | Screening (vectorized) and high-fidelity (event-driven) backtesters, order/fill models, portfolio accounting |
+| `execution` | Venue-specific execution and cost models (AMM math, gas, MEV haircut, CEX spread/fees) |
+| `metrics` | Returns, Sharpe, Sortino, drawdown, turnover, capacity, hit rate, factor regressions |
+| `stats` | DSR, PBO, MinTRL, multiple-testing corrections, HAC errors, bootstrap |
+| `integrity` | Causality tests, static lint, accounting invariants |
+| `report` | Charts and tables for reports, sourced only from ledger records |
 
-| Entity | Key fields |
-|--------|-----------|
-| `Instrument` | `instrument_id`, `asset_class`, `symbol`, `chain`, `contract_address`, `decimals`, `attributes{}` |
-| `Venue` | `venue_id`, `type` (amm_v2, amm_clmm, orderbook, perp, exchange, …), `chain`, `fee_model` |
-| `Market` | `market_id`, `venue_id`, `base`, `quote`, `pool_address`, `fee_tier`, `created_at`, `closed_at` |
-| `MarketEvent` | `market_id`, `event_time`, `knowledge_time`, `block_number`, `tx_hash`, `log_index`, `type` (swap, mint, burn, trade, quote, funding…), `payload{}` |
-| `MarketState` | `market_id`, `as_of`, state snapshot (reserves, sqrt price, tick liquidity map, order book, …) |
-| `ChainContext` | `chain`, `block_number`, `timestamp`, `base_fee`, `priority_fee_pctiles`, `reorg_depth_seen` |
-| `UniverseMembership` | `instrument_id`/`market_id`, `valid_from`, `valid_to`, `reason` |
+### 10.2 How strategies are written (and why agents can't write their own engine)
 
-### 8.3 Point-in-time (bitemporal) guarantees
+**Authoring modes (in order of preference):**
+1. **Declarative strategy spec** (YAML/DSL): composes certified operators into features, signals, position rules, and portfolio construction. If every operator is causal, the composition is causal. Most strategies should fit here.
+2. **Restricted plugin** (Python): for logic the DSL can't express. It implements `compute_signals(view) -> weights` or `on_event(view, event) -> orders` against library interfaces, and faces stricter checks (below).
 
-- Every record carries `event_time` (when it happened) and `knowledge_time` (when our system could have known it, accounting for block finality, indexer lag, and reorgs).
-- The research API only exposes data with `knowledge_time ≤ simulation clock`. There's no unrestricted query path for strategy code.
-- **Finality policy** [DEFAULT]: Data is usable only after N confirmations per chain, with N configured per chain. Reorged events are retained and flagged.
-- Snapshots are immutable and content-addressed. Every experiment references a snapshot hash.
+**Enforcement:**
+- **Sandbox import allowlist:** strategy code may import only the library's public API and a small allowlist (e.g. `math`, `numpy` math functions). No file/network I/O, no `pandas`/`polars` I/O, no direct data store access. It's impractical to load data or simulate fills outside the engine.
+- **Engine owns alignment and fills:** strategies output signals or target weights. The engine decides *when* they become tradable (at `knowledge_time` of the inputs plus the execution lag) and *how* they fill. Strategies can't change signal→fill timing.
+- **Inadmissibility rule:** only results produced by the certified engine path, recorded in the ledger, can be cited (R1), pass gates, or appear in reports. Analysts may do scratch EDA in a sandbox on Development data, but its outputs are tagged `non_admissible`, logged, and can't advance a hypothesis.
+- **Engine and library code are read-only** to research agents.
 
-### 8.4 Data QA & quarantine
+### 10.3 Integrity checks (run automatically on every strategy and operator)
 
-- Schema and range checks, gap detection, and cross-source reconciliation (indexer vs raw logs, DEX vs CEX reference price).
-- **Wash-trading / fake-volume filters**, e.g. self-trades, circular flows, and volume inconsistent with fees paid.
-- **Token risk flags:** honeypot or blacklist logic, fee-on-transfer, rebasing, mint authority, extreme ownership concentration.
-- Failing data is **quarantined**: excluded from research and listed on the Data Steward's queue. Strategies that consumed data that's later quarantined are flagged for re-run (§13).
+| Check | What it does | When |
+|-------|--------------|------|
+| **Causal views (structural)** | In the event-driven tier, the data view at time *t* physically contains only records with `knowledge_time ≤ t`. | Always |
+| **Truncation invariance** | Compute signals on data truncated at many random times *t* and on full data. Values at *t* must be identical. Any difference means lookahead. | Every new strategy/operator version; at freeze |
+| **Future perturbation** | Randomly perturb or shuffle data after *t*. Signals at or before *t* must not change. | Same as above |
+| **Static lint** | AST checks for banned patterns: negative shifts, centered windows, `bfill`, full-sample normalization/fit, indexing past the current position, global min/max/mean in features, label operators used as features. | On submit |
+| **Accounting invariants** | Cash + position value reconciles every step. No phantom inventory. Fees/gas are always ≥ 0. Fills stay within the bar/pool's feasible range. | Every engine run |
+| **Data-fidelity check** | Strategy order types are compatible with the data kind (e.g. intrabar stops on OHLC use conservative rules, §11.5). | On run |
 
----
+### 10.4 Extending the library (Library Change Requests)
 
-## 9. Simulation & Backtesting Engine
+Agents will need new features. The process lets them get them quickly without bypassing quality:
 
-### 9.1 Two tiers
+```mermaid
+flowchart LR
+    N[Agent needs operator/feature] --> C{Exists in catalog?}
+    C -->|yes| U[Use it]
+    C -->|similar| X[Extend/parameterize existing op via LCR]
+    C -->|no| L[File Library Change Request<br/>spec + use case + tests wanted]
+    L --> T[Platform Lead triage + dedupe]
+    X --> T
+    T --> I[Library Engineer implements<br/>+ unit + property + causality tests]
+    I --> E[Tier: experimental<br/>screening use only]
+    E --> R[Code Auditor review + mutation score + catalog docs]
+    R --> CERT[Tier: certified<br/>usable through validation]
+```
 
-| | Screening tier | High-fidelity tier |
-|---|---|---|
-| Purpose | Fast kill/keep at G2 and in Exploration | Validation (G3), Holdout (G4) |
-| Style | Vectorized on bars | Event-driven, block-by-block (or tick-by-tick) |
-| Costs | Parametric cost model (fee + slippage curve + gas average) | Exact AMM math against reconstructed pool state, actual gas by block, MEV haircut, latency |
-| Speed target [DEFAULT] | < 60 s per trial on the standard universe | Minutes to hours |
-| Trials logged | Yes | Yes |
+| Tier | Who can add | Requirements | Usable in |
+|------|-------------|--------------|-----------|
+| `experimental` | Library Engineer | Unit tests, causality tests pass, catalog entry | Screening and Exploration only |
+| `certified` | Promotion by Platform Lead + Code Auditor | Plus property-based tests, oracle comparison where applicable, mutation score ≥ threshold, docs | All stages |
+| `core` (engine, fills, accounting, data API, CV, stats) | Library Engineer, **human approval required** | Plus full certification suite rerun, engine version bump, regression diff explained | All stages |
 
-**Implementation equivalence (§7.4)** ties the tiers together. A candidate can't advance if the two tiers disagree beyond tolerance without a documented explanation.
+- **Operator catalog:** searchable (names, docs, signatures, semantic search). It's checked before any LCR to prevent duplicates.
+- A candidate can't be frozen until every operator it uses is `certified` or `core`.
+- A requester can't certify its own request (builder/user split).
 
-### 9.2 Engine contracts
+### 10.5 Engine validation & certification
 
-- **Strategy interface:** `on_event(state, event) -> orders` (event-driven) and `compute_signals(panel) -> weights` (vectorized). The same strategy definition should compile to both where feasible.
-- **Determinism:** Fixed seeds. Results must be bit-for-bit reproducible given (code hash, config hash, data snapshot hash, engine version).
-- **Sandboxing:** Strategy code runs in a sandbox with no network access, no filesystem access outside the PIT API, and resource limits.
-- **Automatic logging:** Every invocation writes to the Trial Registry and Experiment Ledger *before* returning results. There's no unlogged code path.
+| Layer | Technique |
+|-------|-----------|
+| Unit tests | Every function, including edge cases (empty data, gaps, single asset, zero liquidity) |
+| Property-based tests | Generated inputs check invariants, e.g. returns compound correctly, resample(ticks) matches aggregation, ranks are permutation-equivariant |
+| Golden tests | Hand-computed expected results on small fixtures |
+| **Reference oracle** | A deliberately simple, slow, obviously correct loop implementation of the backtester. The production engines must match it on small datasets. |
+| Known-answer strategies | Buy-and-hold equals asset return minus costs. Zero-signal earns zero. Two-sided trades at constant price lose exactly the costs. |
+| Cross-tier reconciliation | Screening and high-fidelity tiers agree within tolerance on shared scenarios |
+| **Seeded-defect canary suite** | Deliberately flawed strategies (lookahead, misaligned bars, survivorship, missing costs). Integrity checks must flag 100% of them. This tests the checks themselves. |
+| Mutation testing | Mutation score on `core` ≥ target [DEFAULT 85%]. Line coverage ≥ 95% [DEFAULT]. |
+| External sanity | Reproduce a few well-known published results within tolerance |
 
----
-
-## 10. DEX-Specific Realism Requirements
-
-| Concern | Requirement |
-|---------|-------------|
-| **AMM price impact** | Compute execution price exactly from pool state: constant product (v2), concentrated liquidity tick traversal (v3/v4), StableSwap invariant (Curve), weighted pools (Balancer). Multi-hop routes are simulated hop by hop. |
-| **Liquidity & capacity** | Position size is limited to a configurable fraction of pool depth within X% price impact. Report a capacity curve (net return vs. notional). |
-| **Fees** | Pool fee tier, protocol fees, aggregator fees if routing through one. |
-| **Gas** | Actual base fee and priority fee per block for the transaction type. L2s include L1 data fees. Failed transactions also cost gas. |
-| **MEV** | A sandwich/frontrun haircut on public-mempool orders, calibrated from historical MEV data. Scenario switch for private orderflow (e.g. MEV-protect RPCs) with different inclusion latency. |
-| **Latency / inclusion** | Orders execute no earlier than the next block after the signal's `knowledge_time`. Inclusion probability is modeled under congestion. |
-| **Token pathologies** | Fee-on-transfer and rebasing tokens handled or excluded. Honeypots excluded via QA flags. Rug-pulled tokens stay in the universe until their PIT exit. |
-| **Bridging / inventory** | Cross-chain strategies model bridge fees, latency, and inventory constraints. No instant cross-chain netting. |
-| **Funding (perp DEXs)** | Funding payments, mark/index price mechanics, liquidation rules, open-interest caps. |
-| **LP strategies** | Fee accrual by in-range liquidity share, impermanent loss / loss-versus-rebalancing (LVR), rebalancing gas, JIT liquidity competition. |
-
----
-
-## 11. Initial Research Agenda (Crypto / DEX)
-
-Candidate desks. The Director opens 2–3 desks first [OPEN, Q-5].
-
-| Desk | Hypothesis family examples | Key risk of false positive |
-|------|---------------------------|----------------------------|
-| **Cross-sectional** | Momentum / reversal across DEX tokens, liquidity-adjusted. Volume/TVL shocks. | Survivorship, illiquidity, small-cap concentration |
-| **Time-series / trend** | Trend following on majors and mid-caps traded on DEX | Regime dependence (single bull run) |
-| **On-chain flow** | Smart-money wallet flows, CEX deposit/withdrawal flows, bridge flows, whale accumulation | Lookahead via wallet labeling done after the fact; label leakage |
-| **Event-driven** | Token unlocks, new pool launches, listings, governance votes, airdrops | Small event counts; clustering in time |
-| **AMM liquidity provision** | Concentrated-liquidity range strategies, fee-tier selection, LVR-aware LP | Underestimated LVR/IL, JIT competition, gas |
-| **Perp DEX carry / basis** | Funding-rate carry, perp vs spot basis on Hyperliquid/dYdX/GMX | Tail/liquidation risk, venue risk |
-| **Cross-venue dislocations (non-latency)** | Persistent multi-block mispricings between pools/chains after accounting for bridge and inventory costs | MEV competition already captures most of it. Unrealistic fill assumptions. |
-
-The Librarian seeds each desk's knowledge base with relevant literature and known prior results, including known negative results.
+**Engine releases** are semver-versioned. Every ledger record includes the engine version. A new version must pass certification, and any change to golden/regression results must be explained in the release notes. Results affected by a bug fix are flagged for re-run (§15.2).
 
 ---
 
-## 12. Efficiency & Budgeting
+## 11. Data Platform
 
-### 12.1 Budget hierarchy
-- The Human sets the global budget (LLM tokens + compute + data costs) per period.
-- The Director allocates to desks. Desk Leads allocate to hypotheses. Each hypothesis has a `max_trials_budget` and a cost budget from pre-registration.
+### 11.1 Data kinds
 
-### 12.2 Adaptive allocation
-- The Director treats hypotheses as arms in a **multi-armed bandit**, prioritizing by expected information value. It uses screening results, mechanism quality scores, novelty (from the Librarian), and cost-to-test.
-- **Important:** Adaptive allocation decides *where to spend effort*. It never relaxes statistical gates. Trials spent anywhere still count (P2).
+| Kind | Description | Examples |
+|------|-------------|----------|
+| `trade` (tick) | Individual trades | CEX trade prints; DEX swaps (as trades) |
+| `quote_l1` | Best bid/ask | CEX top of book |
+| `book_l2` | Order-book snapshots/deltas | CEX depth |
+| `bar` | OHLC / OHLCV (+ optional VWAP, trade count, quote volume) at an interval | 1m…1d candles from APIs or files |
+| `amm_event` | Swap/mint/burn/collect events | Uniswap, Raydium, Orca logs |
+| `amm_state` | Pool state snapshots | Reserves, sqrtPrice, tick liquidity |
+| `funding` / `open_interest` | Perp metrics | Perp DEX/CEX funding |
+| `onchain_transfer` | Token transfers, flows | Wallet/bridge/CEX deposit flows |
+| `reference` | Instrument metadata, listings/delistings, token properties | Instrument master |
 
-### 12.3 Cost controls
-- **Model tiering:** cheaper/faster models for scouting, summarization, deduping, and routine code. Strongest models for hypothesis design, red-teaming, and verdict synthesis. [OPEN, Q-8]
-- **Prompt caching** of role prompts and shared context. **Feature-store caching** of computed features across desks.
-- **Early stopping:** screening runs abort when kill criteria are hit. Exploration stops when the trial budget is reached.
-- **Dedupe before work:** the Librarian checks new ideas against the knowledge base, including archived rejections, before registration.
-- **Batching:** parameter sweeps run as one engine job rather than as many agent tool calls.
+Each kind has a canonical normalized schema. All timestamps are UTC, integer nanoseconds. Prices and quantities use explicit decimal precision. Volume units (base vs quote) are always explicit.
 
-### 12.4 System KPIs (reported by the Director)
-- Hypotheses registered, screened, validated, and promoted per period. Kill-reason distribution.
-- Cost per hypothesis per stage. Cost per validated strategy.
-- Pipeline FDR and power from injection (§7.6).
-- Holdout and forward decay statistics.
+### 11.2 Layers
+
+```
+connectors → RAW (immutable, as-received + fetch manifest)
+           → NORMALIZED (canonical schema per kind, PIT/bitemporal)
+           → DERIVED (bars built from ticks, features cache) — produced only by certified library code
+```
+
+- **Raw archive:** exact responses/files plus a manifest: source, endpoint, params, `fetched_at`, HTTP status, checksum, connector version. Raw data is never modified.
+- **Normalized:** parsed into canonical schemas, keyed by `(source, kind, instrument, time)`. Multiple sources for the same instrument are kept side by side, not merged silently.
+- **Derived:** e.g. bars aggregated from ticks (time, volume, dollar, tick bars) by certified operators. Vendor-provided bars and our derived bars are stored separately and reconciled where both exist.
+- **Snapshots** are content-addressed. Experiments reference snapshot hashes.
+
+### 11.3 Point-in-time & timestamp conventions
+
+- Every record has `event_time` and `knowledge_time`.
+- **Bars:** stored with `interval_start` and `interval_end`. **`knowledge_time = interval_end + publication_latency`** [DEFAULT latency per source]. A bar's close can't be used to trade inside that same bar. This convention is enforced by the data API (D-013).
+- Incomplete or in-progress bars are flagged and excluded from research.
+- **On-chain data:** `knowledge_time` reflects block finality per chain [DEFAULT confirmations per chain]. Reorged events are retained and flagged.
+- The research API only returns data with `knowledge_time ≤ simulation clock`.
+
+### 11.4 Ingestion framework (connectors)
+
+Connectors are plugins implementing a common contract:
+
+```python
+class SourceConnector(Protocol):
+    source_id: str
+    kinds: set[DataKind]
+    def discover(self) -> list[InstrumentRef]: ...          # what's available (incl. delisted, if possible)
+    def fetch(self, req: FetchRequest) -> RawBatch: ...      # one page/chunk, with manifest
+    def parse(self, raw: RawBatch) -> NormalizedBatch: ...   # → canonical schema
+```
+
+| Connector type | Phase | Notes |
+|----------------|-------|-------|
+| **REST API scripts** (public/free endpoints) | v1 | Paginated historical pulls. User may supply existing scripts to wrap. |
+| **Bulk file downloads** (public archives of CSV/zip) | v1 | Often the cheapest route to long tick/OHLCV history |
+| **User-supplied files** | v1 | Drop files plus a mapping config |
+| **WebSocket recorders** | v1–v2 | Forward collection of ticks/quotes for paper trading and future history |
+| **On-chain RPC / indexer** | v2 | DEX events and pool state |
+| **Vendor API connectors** | Later | Paid data suppliers |
+
+**Connector requirements:** idempotent and resumable (checkpointed), incremental updates, rate-limit aware with backoff, gap detection and backfill, checksum verification, and versioning. Each source has a catalog entry with terms-of-use and licensing notes, maintained by the Data Steward.
+
+**Format adapters:** generic CSV/JSON/Parquet readers driven by a **mapping config** (column names, timestamp unit and timezone, bar label convention, volume units, symbol format). Most new vendor or file formats should be configuration, not code.
+
+```yaml
+format: csv
+columns: {ts: open_time, o: open, h: high, l: low, c: close, v: volume, qv: quote_volume}
+timestamp: {unit: ms, tz: UTC, labels: interval_start}
+interval: 1h
+volume_unit: base
+```
+
+### 11.5 Granularity-aware simulation rules
+
+The engine adapts its fill model to the data's fidelity, and every result carries a `data_fidelity` tag.
+
+| Data available | Default fill model | Restrictions |
+|----------------|--------------------|--------------|
+| Ticks / AMM events | Trade-through / exact AMM simulation | — |
+| OHLCV bars | Fill at **next bar open** + slippage/impact model scaled by bar volume | Intrabar stop/limit orders use a **conservative path assumption** (adverse ordering of high/low). Volume participation is capped. |
+| OHLC (no volume) | As OHLCV, but no volume-based capacity | Capacity analysis disallowed. A cost-stress multiplier applies [DEFAULT ×1.5]. |
+
+Strategies whose edge depends on intrabar path or sub-bar timing must be confirmed on tick data before G3 (§9.4).
+
+### 11.6 Instrument master & symbol mapping
+
+- One canonical `asset` (e.g. BTC) maps to many `instruments`: venue-specific tickers and on-chain representations (WBTC, cbBTC, tBTC, …; ETH/WETH; SOL/wSOL).
+- Quote currencies are explicit (USD, USDT, USDC, …). Stablecoin depegs are tracked, and USDT and USD aren't assumed equal.
+- **Listing history:** `listed_at` / `delisted_at` per instrument per venue. This is needed for PIT universes. Free endpoints often expose only currently-listed symbols, so delisted coverage is tracked as a known gap (Q-14).
+
+### 11.7 Data QA & quarantine
+
+- Schema and range checks, gap detection, duplicate detection, and timestamp monotonicity.
+- **Cross-source reconciliation:** the same asset across sources and venues (e.g. DEX vs CEX price, vendor bars vs derived bars).
+- Wash-trading / fake-volume filters. Token risk flags (honeypot, fee-on-transfer, rebasing, mint authority).
+- Failing data is quarantined. Experiments that consumed later-quarantined data are flagged (§15.2).
 
 ---
 
-## 13. Provenance, Reproducibility & Memory
+## 12. Execution Realism (DEX-first)
 
-### 13.1 Experiment Ledger record
+Each strategy declares an `execution_venue`. The engine applies that venue's execution and cost model, *independent of which source provided the research data*. Using one venue's data to simulate trading on another (e.g. CEX bars for a DEX-executed strategy) requires a **proxy-validity check**: basis and tracking error between venues over the test period, plus a cost model for the actual execution venue. See Q-11.
+
+| Concern | Requirement (DEX) |
+|---------|-------------------|
+| **AMM price impact** | Exact pool math: constant product (v2), concentrated liquidity tick traversal (v3/v4, Orca Whirlpools, Raydium CLMM, Meteora DLMM bins), StableSwap (Curve), weighted pools (Balancer). Multi-hop routes simulated hop by hop. |
+| **Liquidity & capacity** | Size capped as a fraction of depth within X% impact. Capacity curve reported. |
+| **Fees** | Pool fee tier, protocol fees, aggregator fees. |
+| **Gas / priority fees** | Per-block gas on EVM chains (plus L1 data fees on L2s). Solana base + priority fees. Failed transactions also cost fees. |
+| **MEV** | Sandwich/frontrun haircut for public-mempool orders, calibrated from history. Private-orderflow scenario. |
+| **Latency / inclusion** | Execution no earlier than the next block/slot after `knowledge_time`. Inclusion probability under congestion. |
+| **Token pathologies** | Fee-on-transfer and rebasing tokens handled or excluded. Honeypots excluded. Rugged tokens stay in the universe until their PIT exit. |
+| **Bridging / inventory** | Bridge fees, latency, and inventory constraints for cross-chain strategies. |
+| **Funding (perps)** | Funding payments, mark/index mechanics, liquidation rules. |
+| **LP strategies** | Fee accrual, IL/LVR, rebalancing gas, JIT competition. |
+
+A **CEX execution model** (spread, taker/maker fees, depth-based impact, funding) is also maintained, both for proxy-validity comparisons and in case Q-11 allows CEX execution.
+
+---
+
+## 13. Pilot Universe & Research Agenda
+
+### 13.1 Pilot universe
+
+| Tier | Assets | Representations / venues | Purpose |
+|------|--------|--------------------------|---------|
+| **A — Majors** | **BTC, ETH, SOL** | CEX reference data (long OHLCV + tick history from free endpoints). On-chain: WBTC/cbBTC and WETH on Ethereum, Base, and Arbitrum DEXs; SOL and wrapped BTC/ETH on Solana DEXs. | Deep liquidity, long history, low data risk. Establishes baselines and calibrates the engine. |
+| **B — Smaller caps** | Rule-selected basket [DEFAULT N = 20–30] | DEX pools on the same chains, plus CEX where listed | Potentially distinct behavior (less efficient, retail-driven, launch/unlock dynamics) |
+
+**Tier B selection must be rule-based and point-in-time, not hand-picked.** Picking today's popular small caps builds in survivorship and hindsight bias. The rule (versioned as `UNIV-tierB-vN`) is applied as of each rebalance date, e.g. "top N by trailing 30-day DEX volume among tokens ≥ 90 days old with ≥ $X pool liquidity, excluding stablecoins and wrapped majors". Tokens that later died or were rugged stay in for the periods they qualified. Parameters: Q-13.
+
+**Chains (initial):** Ethereum, Base, Arbitrum, Solana (D-014). Specific DEX venues per chain: Q-16.
+
+### 13.2 Timescales
+
+No timescale is excluded (D-015). Desks are organized by **mechanism**, not horizon. Mid-scale horizons (minutes to days) are expected to be the most practical for an independent trader, but that's a prioritization signal for the Director, not a constraint.
+
+### 13.3 Infrastructure feasibility classes
+
+Every hypothesis and report carries an `infra_class` tag, so feasibility is visible without restricting research:
+
+| Class | Typical horizon | Requirements |
+|-------|-----------------|--------------|
+| `retail_feasible` | ≥ minutes | Public RPC/API, standard wallet/exchange access |
+| `advanced` | seconds | Private RPC, colocated bots, MEV protection |
+| `specialized` | sub-block / latency-critical | Builder relationships, private orderflow (out of scope to build; see Q-4) |
+
+### 13.4 Candidate research agenda
+
+The Director opens desks on demand. These are candidates, not commitments (D-016). Human requests can open any of them, or new ones.
+
+| Candidate desk | Example hypothesis families | Key false-positive risk |
+|----------------|-----------------------------|-------------------------|
+| Cross-sectional | Momentum/reversal across tokens; volume/liquidity shocks | Survivorship, small-cap concentration |
+| Time-series / trend | Trend and mean reversion on majors at multiple horizons | Single-regime dependence |
+| Seasonality / calendar | Time-of-day, weekend, funding-time effects | Data mining over many calendar slices (trial counting essential) |
+| On-chain flow | Smart-money wallets, CEX/bridge flows | Wallet labels assigned with hindsight |
+| Event-driven | Unlocks, launches, listings, governance | Few events, time clustering |
+| AMM liquidity provision | CLMM range strategies, fee-tier choice | Underestimated LVR, JIT competition, gas |
+| Perp carry / basis | Funding carry, perp–spot basis | Tail/liquidation risk, venue risk |
+| Cross-venue dislocations (non-latency) | Persistent DEX–DEX / DEX–CEX gaps | MEV competition, unrealistic fills |
+
+---
+
+## 14. Efficiency & Budgeting
+
+### 14.1 Budget hierarchy
+- The Human sets the global budget (LLM + compute + data) per period, including the Human Request lane share (§7.2).
+- The Director allocates to desks and requests. Desk Leads allocate to hypotheses, each with `max_trials_budget` and a cost budget.
+- The Model Gateway enforces token/cost caps per role and per work item (§6.3).
+
+### 14.2 Adaptive allocation
+- The Director prioritizes hypotheses as a multi-armed bandit on expected information value (screening results, mechanism quality, novelty, cost-to-test, `infra_class`).
+- Adaptive allocation never relaxes statistical gates. All trials count (P2).
+
+### 14.3 Cost controls
+- **Policy-based model selection** (§6): cheapest model that meets the role's bench minimums. Cascades for routine roles. Strongest models where quality matters most.
+- **Centralized library** (§10): no duplicate implementations. Features are computed once in the shared cache.
+- Prompt caching (where the provider supports it), batch APIs for non-urgent work, early stopping on kill criteria, batched parameter sweeps.
+- **Dedupe before work:** ideas are checked against the KB, and operators against the catalog.
+
+### 14.4 System KPIs (in the Research Digest)
+- Hypotheses and requests by stage. Kill-reason distribution. Request turnaround.
+- Cost per hypothesis per stage. Cost per validated strategy. Cost by role and model.
+- Pipeline FDR and power (§9.6). Holdout and forward decay.
+- Library health: LCR queue length and time to certification, test/mutation scores.
+- Model health: bench scores, fallback rate, schema/tool error rate per model.
+
+---
+
+## 15. Provenance, Reproducibility & Memory
+
+### 15.1 Experiment Ledger record
 ```yaml
 experiment_id: EXP-2026-000045
 hypothesis_id: HYP-000123
 hypothesis_version: 1
+request_id: REQ-0007            # if originated from a human request
 trial_family: cross_sectional_momentum
-stage: exploration            # screening | exploration | validation | holdout | paper
+stage: exploration              # scratch_eda | screening | exploration | validation | holdout | paper
+admissible: true                # false for scratch EDA
 engine_tier: screening
 engine_version: 0.3.1
-code_hash: sha256:...
+library_ops: {zscore: certified@1.2.0, ema: certified@1.0.3}
+spec_hash: sha256:...
 config_hash: sha256:...
 data_snapshot: sha256:...
-params: {lookback_hours: 24, holding_hours: 12, rebalance: hourly}
+data_fidelity: bar_1h
+params: {lookback_hours: 24, holding_hours: 12}
 seed: 42
-requested_by: analyst-xsec-01
-started_at: ...
-metrics: {...}                # written by engine only
+requested_by: {agent: analyst-xsec-01, model: provider-x/model-a-2026-09, call_ids: [...]}
+metrics: {...}                  # written by engine only
 artifacts: [returns.parquet, trades.parquet]
-status: completed             # completed | failed | aborted
+status: completed
 ```
 
-### 13.2 Invalidation
-If engine, cost-model, or data snapshot changes are found to be defective, dependent experiments are flagged automatically, and affected candidates go back to the appropriate state.
+### 15.2 Invalidation
+If an engine, operator, cost-model, or data defect is found, every dependent experiment is flagged automatically (via `engine_version`, `library_ops`, and `data_snapshot` lineage). Affected candidates and reports are marked and sent back to the appropriate state.
 
-### 13.3 Knowledge base (organizational memory)
-- Stores hypotheses, verdicts, kill reasons, red-team findings, and lessons learned, all searchable.
-- **Negative results are first-class**, which keeps us from re-discovering the same false positive.
+### 15.3 Knowledge base
+- Hypotheses, verdicts, kill reasons, red-team findings, investigation reports, and lessons learned, all searchable.
+- **Negative results are first-class.**
 - Verdict summaries are generated from ledger data, not from agent memory.
 
 ---
 
-## 14. Extensibility to Other Asset Classes
+## 16. Extensibility to Other Asset Classes
 
-The core (agents, lifecycle, Trial Registry, Stat Gates, ledger) is asset-class agnostic. Each asset class supplies an **adapter bundle**:
+The core (agents, model gateway, lifecycle, Trial Registry, Stat Gates, ledger, core library) is asset-class agnostic. Each asset class supplies an **adapter bundle**:
 
-| Interface | DEX crypto (v1) | Equities/ETFs (future) | Options (future) | Futures (future) |
-|-----------|-----------------|------------------------|------------------|------------------|
-| `DataAdapter` | Chain/indexer ingestion | Vendor feeds, corporate actions | Chains, IV surfaces | Contract rolls, continuous series |
-| `UniverseProvider` | Pool/token filters, PIT listings | PIT index membership, delistings | Strike/expiry selection | Front/back contract rules |
-| `ExecutionSimulator` | AMM math, gas, MEV | Spread, impact model, auctions | Bid/ask, greeks-aware fills | Tick size, limits, margin |
+| Interface | Crypto (v1) | Equities/ETFs (future) | Options (future) | Futures (future) |
+|-----------|-------------|------------------------|------------------|------------------|
+| `SourceConnector`s / format adapters | Public APIs, bulk files, chain/indexer | Vendor feeds, corporate actions | Chains, IV surfaces | Contract data, rolls |
+| `UniverseProvider` | Rule-based PIT token/pool universes | PIT index membership, delistings | Strike/expiry selection | Front/back contract rules |
+| `ExecutionSimulator` | AMM math, gas, MEV; CEX book model | Spread, impact, auctions | Bid/ask, greeks-aware fills | Tick size, limits, margin |
 | `CostModel` | Fees, gas, MEV haircut | Commissions, borrow, taxes | Spreads, assignment | Commissions, roll costs |
-| `Calendar` | 24/7, block-based | Exchange sessions, holidays | Expiry calendar | Session + roll calendar |
-| `RiskFactorSet` | Crypto beta, size, liquidity, momentum | Fama-French style factors | Greeks, vol factors | Carry, trend, term structure |
+| `Calendar` | 24/7, block/slot-based | Exchange sessions, holidays | Expiry calendar | Session + roll calendar |
+| `RiskFactorSet` | Crypto beta, size, liquidity, momentum | Fama-French style | Greeks, vol factors | Carry, trend, term structure |
 | `PartitionPolicy` | Holdout duration, finality | Holdout duration | ... | ... |
-
-Adding an asset class means implementing the adapter bundle and opening new desks. The validation framework doesn't change.
 
 ---
 
-## 15. Proposed Technology Stack [OPEN — Q-7]
+## 17. Proposed Technology Stack
+
+**[OPEN — Q-7]**
 
 | Area | Proposal | Rationale |
 |------|----------|-----------|
-| Language | Python for research and agents. Rust (via PyO3) for hot paths later, e.g. CLMM tick simulation. | Ecosystem, speed where needed |
-| Data | Parquet on object storage, DuckDB / Polars for query and compute | Columnar, fast, cheap, local-first |
-| Metadata stores | Postgres for the Trial Registry, Ledger index, and Knowledge Base metadata. pgvector for semantic search. | Transactional integrity for registries |
-| Agent runtime | Claude Agent SDK, with role-scoped tool permissions. Tools exposed as MCP servers (engine, data, registry, KB). | Permission scoping maps directly to §5 barriers |
-| Orchestration | Workflow engine for lifecycle state (e.g. Temporal, Prefect, or a lightweight custom state machine) | Durable, resumable long-running research |
-| Sandboxing | Containerized strategy execution with no network | Safety + leakage control |
-| Experiment tracking | Custom ledger (above), optionally mirrored to MLflow for UI | Ledger is source of truth |
-| Reporting | Auto-generated verdict packages (Markdown/HTML) from ledger data | R1 enforcement |
+| Language | Python for research, agents, and the library. Rust (PyO3) later for hot paths (CLMM simulation, tick aggregation). | Ecosystem; speed where needed |
+| Data | Parquet on object or local storage. DuckDB / Polars for query and compute. | Columnar, fast, cheap, local-first |
+| Metadata stores | Postgres for the Trial Registry, Ledger index, Request tracker, Model Registry history, KB metadata. pgvector for semantic search (KB, operator catalog). | Transactional integrity |
+| Model access | In-house **Model Gateway** with provider adapters. Optionally wraps an existing multi-provider library behind our interface (Q-15). | Provider neutrality (§6) |
+| Agent runtime | Thin in-house agent loop. Tools exposed as **MCP** servers (engine, data, registry, KB, reports). | Provider-neutral tools; permissions enforced on our side (D-018) |
+| Orchestration | Durable workflow engine for lifecycle state (e.g. Temporal, Prefect, or a lightweight custom state machine) | Long-running, resumable research |
+| Testing | pytest, Hypothesis (property-based), mutmut or similar (mutation), coverage gates in CI | Library certification (§10.5) |
+| Sandboxing | Containerized strategy execution, no network, import allowlist | Safety + leakage control |
+| Reporting | Markdown + HTML reports generated from ledger data | R1 enforcement |
 
 ---
 
-## 16. Roadmap
+## 18. Roadmap
 
 | Phase | Name | Scope | Exit criteria |
 |-------|------|-------|---------------|
-| 0 | **Design** | This document. Resolve critical open questions. | Q-1, Q-2, Q-5, Q-7 decided |
-| 1 | **Data foundation** | Ingestion for the chosen chain(s) and venues. PIT store, QA, snapshots. | Reconciled swap and pool-state history for the initial universe, with QA report |
-| 2 | **Engine & governance** | Screening tier, Trial Registry, Ledger, Stat Gate Service, Gatekeeper | Reproduces known textbook results. Null strategies are rejected at the expected rate. |
-| 3 | **High-fidelity simulation** | AMM-exact execution, gas, MEV haircut, capacity | Simulated fills match a sample of real historical trades within tolerance |
-| 4 | **Agent MVP** | Director + 1 desk + Validation Office, with operating rules and tooling enforcement | One hypothesis family processed end-to-end with full provenance |
-| 5 | **Pipeline calibration** | Null and positive injection. Threshold tuning. | Measured FDR and power meet §7.1 targets |
-| 6 | **Scale out** | Additional desks, bandit allocation, paper trading harness | Steady-state throughput and cost KPIs established |
-| 7 | **Next asset class** | First non-crypto adapter bundle | Same lifecycle runs unchanged on the new asset class |
+| 0 | **Design** | This document. Resolve critical open questions. | Q-7, Q-11, Q-12 decided |
+| 1 | **Data foundation** | Connector framework, format adapters, raw archive, normalized PIT store, QA. Tier A (BTC/ETH/SOL) OHLCV + tick data from free endpoints/files. Instrument master. | Multi-year reconciled Tier A history at tick and bar level, with QA report |
+| 2 | **Core library & engine certification** | Data API, operators, screening engine, reference oracle, integrity checks, seeded-defect canaries, Trial Registry, Ledger, Stat Gate Service | Certification suite green. Canaries 100% detected. Null strategies rejected at the expected rate. |
+| 3 | **Model gateway & agent MVP** | Gateway with ≥ 2 provider/model options, registry, role profiles, initial QAM-Bench. Director + 1 desk + Validation Office + Reporter. Request intake. | One human request answered end-to-end with a full report |
+| 4 | **High-fidelity & DEX data** | On-chain connectors (EVM + Solana), AMM-exact simulation, gas/MEV models, Tier B universe | Simulated fills match a sample of real historical trades within tolerance |
+| 5 | **Pipeline calibration** | Null/positive injection, threshold tuning, model onboarding pipeline (shadow/canary) | Measured FDR and power meet §9.1 |
+| 6 | **Scale out** | More desks, bandit allocation, paper trading harness, WebSocket recorders, Platform Engineering agents handling LCRs | Steady-state throughput/cost KPIs established |
+| 7 | **Vendors & next asset class** | Vendor connectors; first non-crypto adapter bundle | Same lifecycle runs unchanged on the new asset class |
 
 ---
 
-## 17. Decision Log
+## 19. Decision Log
 
 | ID | Date | Decision | Rationale | Status |
 |----|------|----------|-----------|--------|
-| D-001 | 2026-10-05 | Initial scope is crypto on DEXs. Core stays asset-class agnostic. | User direction. Adapters keep the door open (§14). | Accepted |
+| D-001 | 2026-10-05 | Initial scope is crypto, focused on DEXs. Core stays asset-class agnostic. | User direction; adapters keep the door open (§16) | Accepted |
 | D-002 | 2026-10-05 | LLM agents never compute performance metrics. Deterministic engine only. | Hallucination and reproducibility risk (P3) | Accepted |
-| D-003 | 2026-10-05 | Holdout accessible only through a non-LLM gatekeeper with coarse feedback and per-family budgets | Prevents holdout overfitting via feedback loops (P5) | Accepted |
+| D-003 | 2026-10-05 | Holdout accessible only through a non-LLM gatekeeper with coarse feedback and per-family budgets | Prevents holdout overfitting (P5) | Accepted |
 | D-004 | 2026-10-05 | Validation Office is organizationally independent of research desks | Separation of duties (P4) | Accepted |
-| D-005 | 2026-10-05 | v1 ends at paper trading. No live capital. Latency MEV out of scope. | Focus on research quality first (§2) | Accepted |
-| D-006 | 2026-10-05 | Pipeline error rates measured empirically via blinded null/positive injection | Makes "minimize false positives" measurable (§7.6) | Accepted |
+| D-005 | 2026-10-05 | v1 ends at paper trading. No live capital. Latency MEV not built. | Research quality first (§2) | Accepted |
+| D-006 | 2026-10-05 | Pipeline error rates measured via blinded null/positive injection | Makes "minimize false positives" measurable (§9.6) | Accepted |
+| D-007 | 2026-10-05 | All LLM access goes through a provider-neutral Model Gateway. Models are chosen per role by policy from a version-pinned Model Registry. | Adopt new/better/cheaper models without code changes (P13, §6) | Accepted |
+| D-008 | 2026-10-05 | Models are selected and onboarded by our own role-specific benchmark (QAM-Bench) and a candidate→shadow→canary→active pipeline. Human approval for validation roles. | Public benchmarks don't measure our tasks. Safe rollout. (§6.4–6.5) | Accepted |
+| D-009 | 2026-10-05 | A single certified core library implements all standard operations. Only certified-engine results are admissible. Agents can't write their own engine/fills/data loaders. | Prevents subtle bugs and lookahead, deduplicates effort (P11, §10) | Accepted |
+| D-010 | 2026-10-05 | Strategies are authored as declarative specs over certified operators by default. Restricted Python plugins in a sandbox otherwise. Engine controls signal→fill alignment. | Causal by construction (P12, §10.2) | Accepted |
+| D-011 | 2026-10-05 | Library extension through Library Change Requests with experimental/certified/core tiers. Core changes need human approval. | Fast extension without bypassing quality (§10.4) | Accepted |
+| D-012 | 2026-10-05 | Connector-based ingestion supporting multiple data kinds (tick, OHLC/OHLCV, L1/L2, AMM, funding, on-chain). v1 sources: free public endpoints, bulk files, user-supplied files/scripts. Vendor connectors later; vendor formats via mapping configs. *(Resolves Q-2.)* | User direction; flexibility at low cost (§11.4) | Accepted |
+| D-013 | 2026-10-05 | Canonical bar convention: `knowledge_time = interval_end + publication_latency`. Engine fill models adapt to data fidelity, with conservative OHLC rules. | Bar misalignment is a top lookahead source (§11.3, §11.5) | Accepted |
+| D-014 | 2026-10-05 | Pilot universe: Tier A = BTC, ETH, SOL; Tier B = rule-based PIT small-cap basket. Initial chains: Ethereum, Base, Arbitrum, Solana. *(Resolves Q-1.)* | User direction. Rule-based Tier B avoids survivorship bias. (§13.1) | Accepted |
+| D-015 | 2026-10-05 | No timescale constraint. Hypotheses tagged with `infra_class` for feasibility visibility. *(Resolves Q-3.)* | User direction (§13.2–13.3) | Accepted |
+| D-016 | 2026-10-05 | No fixed initial desks. The research agenda is a candidate list. Desks open on demand, including from human requests. *(Resolves Q-5.)* | User direction (§13.4) | Accepted |
+| D-017 | 2026-10-05 | Human Research Request lane: structured intake, request→hypothesis mapping confirmation, depth levels, reserved budget share, standardized Investigation Reports | User direction (§7) | Accepted |
+| D-018 | 2026-10-05 | Agent runtime is a thin in-house loop over the Model Gateway, with tools as MCP servers. Supersedes the v0.1 proposal of a single-vendor agent SDK. | Provider neutrality; permissions enforced in our tool layer (§6.1) | Accepted |
 
 ---
 
-## 18. Open Questions
+## 20. Open Questions
 
 | ID | Question | Options / notes | Needed by |
 |----|----------|-----------------|-----------|
-| Q-1 | Which chains first? | (a) Ethereum mainnet + Base + Arbitrum (EVM, shared tooling); (b) add Solana (high DEX volume, different tooling); (c) include perp DEX (Hyperliquid) | Phase 1 |
-| Q-2 | Build vs buy for decoded data? | Self-decode from archive nodes (control, cost) vs warehouse/indexer (speed). Likely hybrid: buy to start, verify against raw. | Phase 1 |
-| Q-3 | Target trading frequency / horizon? | Minutes–hours vs hours–days. Drives data granularity and engine design. | Phase 1 |
-| Q-4 | Any latency-sensitive strategies in a later phase? | If yes, needs separate infra track (private orderflow, builder integration). | Phase 6+ |
-| Q-5 | Which 2–3 desks first? | Suggest: Cross-sectional, Perp carry/basis, AMM LP. Different mechanisms, different failure modes. | Phase 4 |
-| Q-6 | Add a cross-sectional (token-level) holdout in addition to the time holdout? | Increases protection, reduces training universe | Phase 2 |
-| Q-7 | Confirm technology stack (§15) | — | Phase 1 |
-| Q-8 | Model assignment per role and budget per period | Depends on cost targets | Phase 4 |
-| Q-9 | Capital/notional assumptions for capacity analysis | e.g. $10k / $100k / $1M notional tiers | Phase 3 |
-| Q-10 | Risk-management layer for paper trading (position limits, kill switches) | Required before any live consideration | Phase 6 |
+| Q-4 | Any latency-sensitive (`specialized`) strategies in a later phase? | Needs a separate infra track | Phase 6+ |
+| Q-6 | Add a cross-sectional (asset-level) holdout in addition to the time holdout? | More protection, smaller training universe | Phase 2 |
+| Q-7 | Confirm technology stack (§17) | — | Phase 1 |
+| Q-8 | Initial model assignments per role and LLM budget per period | Mechanism decided (D-007/D-008). Initial values pending Q-12 and the first QAM-Bench run. | Phase 3 |
+| Q-9 | Notional tiers for capacity analysis | e.g. $10k / $100k / $1M | Phase 4 |
+| Q-10 | Risk-management layer for paper trading (limits, kill switches) | Required before any live consideration | Phase 6 |
+| Q-11 | **CEX vs DEX:** The free long-history OHLC/tick data is likely from centralized exchanges. Is CEX data (a) only a research proxy for DEX-executed strategies (with a proxy-validity check, §12), or (b) also an allowed execution venue? | (b) broadens what's tradeable for an independent trader. (a) keeps the DEX focus strict. | Phase 1 |
+| Q-12 | Which LLM providers and API keys are available initially? | Determines the first adapters and the initial registry | Phase 3 |
+| Q-13 | Tier B universe rule parameters (N, min age, min liquidity, rebalance frequency) | Default proposal in §13.1 | Phase 4 |
+| Q-14 | Do the free endpoints provide history for delisted/dead assets? If not, how do we close the survivorship gap? | Listing-history reconstruction, on-chain data, user-supplied archives | Phase 1 |
+| Q-15 | Build the gateway's provider adapters ourselves, or wrap an existing multi-provider library behind our interface? | Build = control. Wrap = speed, but dependency risk. | Phase 3 |
+| Q-16 | Specific DEX venues per chain for the pilot | e.g. Uniswap v3/v4, Aerodrome (Base), Camelot (Arbitrum); Raydium, Orca, Meteora (Solana) | Phase 4 |
+
+*Resolved:* Q-1 → D-014, Q-2 → D-012, Q-3 → D-015, Q-5 → D-016.
 
 ---
 
-## 19. Changelog
+## 21. Changelog
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.1.0 | 2026-10-05 | Claude (with @brandongla) | Initial draft: goals, principles, architecture, agent hierarchy, lifecycle, false-positive framework, DEX data/simulation requirements, research agenda, efficiency, extensibility, roadmap, decisions, open questions. |
+| 0.2.0 | 2026-10-05 | Claude (with @brandongla) | Added §6 Model Selection & Provider Abstraction (gateway, registry, role profiles, QAM-Bench, model onboarding). Added §7 Human Research Requests & Reporting. Added §10 Core Research Library & Engine Integrity (declarative strategies, sandbox, causality tests, LCR process, certification), replacing the old engine section. Expanded §11 Data Platform (data kinds, raw/normalized/derived layers, connectors, format adapters, bar timestamp convention, granularity-aware fills, instrument master). Added §13 Pilot Universe (BTC/ETH/SOL + rule-based small caps; chains), timescale policy, and infra classes. Added Platform Engineering and Reporter roles, P11–P13, G6–G7, R6. Decisions D-007–D-018. Resolved Q-1, Q-2, Q-3, Q-5. New Q-11–Q-16. Sections renumbered. |
 
 ---
 
-## 20. Glossary
+## 22. Glossary
 
 | Term | Definition |
 |------|-----------|
+| **Admissible result** | A result produced by the certified engine path and recorded in the ledger. Only these can be cited, pass gates, or appear in reports. |
 | **CSCV** | Combinatorially Symmetric Cross-Validation. Used to estimate PBO. |
 | **DSR** | Deflated Sharpe Ratio. The probability that the true Sharpe is > 0 after adjusting for the number of trials and non-normal returns. |
-| **FDR** | False Discovery Rate. The expected fraction of false positives among declared discoveries. |
-| **LVR** | Loss-Versus-Rebalancing. The cost an AMM LP bears from arbitrageurs trading against stale prices. |
-| **MEV** | Maximal Extractable Value. Value extracted by ordering, inserting, or censoring transactions (e.g. sandwich attacks). |
-| **MinTRL** | Minimum Track Record Length needed to reject SR ≤ 0 at a given confidence. |
-| **PBO** | Probability of Backtest Overfitting. The probability that the in-sample-best configuration underperforms the median out of sample. |
-| **PIT** | Point-in-time. Data as it was knowable at a given moment. |
-| **Trial family** | A group of related trials (one hypothesis lineage) sharing a multiple-testing budget. |
+| **FDR** | False Discovery Rate. |
+| **Infra class** | Tag for the infrastructure a strategy would need to trade (§13.3). |
+| **knowledge_time** | The earliest time a record could have been known by the system. Governs PIT access. |
+| **LCR** | Library Change Request (§10.4). |
+| **LVR** | Loss-Versus-Rebalancing. The cost an AMM LP bears from arbitrage against stale prices. |
+| **MEV** | Maximal Extractable Value. |
+| **MinTRL** | Minimum Track Record Length. |
+| **Model Gateway / Registry** | The provider-neutral LLM access layer and its configuration of available models (§6). |
+| **PBO** | Probability of Backtest Overfitting. |
+| **PIT** | Point-in-time. |
+| **QAM-Bench** | Private, role-specific evaluation suite used to select and onboard models (§6.4). |
+| **Trial family** | A group of related trials sharing a multiple-testing budget. |
+| **Truncation invariance** | Causality test: signals at time *t* must be identical whether computed on data truncated at *t* or on full data. |
 | **Vault** | The reserved holdout dataset, accessible only through the Gatekeeper. |
